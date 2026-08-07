@@ -1,0 +1,265 @@
+/* ============ Betriebssystem Laura — Look & Feel ============ */
+:root {
+  --bg: #faf4ec;
+  --card: #fffdf9;
+  --chip: #f3e2cd;
+  --chip-soft: #f8ecdd;
+  --line: #e8d9c6;
+  --ink: #33302c;
+  --ink-soft: #7d746a;
+  --rose: #d69e96;
+  --rose-deep: #c08076;
+  --gold: #c9a27a;
+  --done: #b5c9a8;
+  --shadow: 0 4px 18px rgba(120, 95, 70, 0.10);
+  --radius: 18px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 400;
+  font-size: 15px;
+  line-height: 1.5;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.hidden { display: none !important; }
+
+/* ---------- Typo ---------- */
+.brand {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 1.45rem;
+  text-align: center;
+}
+.script {
+  font-family: 'Great Vibes', cursive;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1.6em;
+  vertical-align: -0.08em;
+}
+.script.big { font-size: 1.5rem; }
+.heart { color: var(--rose-deep); }
+
+h2.section-title {
+  font-family: 'Cormorant Garamond', serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: var(--chip);
+  display: inline-block;
+  padding: 4px 16px;
+  border-radius: 8px;
+}
+
+/* ---------- Layout ---------- */
+.app { max-width: 640px; margin: 0 auto; padding: 0 14px; }
+
+.topbar { padding: max(18px, env(safe-area-inset-top)) 0 6px; text-align: center; }
+.top-sub { color: var(--ink-soft); font-size: 0.82rem; letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; }
+
+.view { padding: 10px 0 8px; min-height: 60vh; }
+
+.motto { text-align: center; padding: 18px 0 90px; color: var(--ink); }
+.motto .script.big { color: var(--ink); }
+
+/* ---------- Tabbar ---------- */
+.tabbar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 4px;
+  background: rgba(255, 253, 249, 0.94);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
+  z-index: 40;
+}
+.tab {
+  flex: 1; max-width: 130px;
+  user-select: none; -webkit-user-select: none;
+  border: none; background: none; cursor: pointer;
+  font-family: 'Montserrat', sans-serif; font-size: 0.72rem; font-weight: 500;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 6px 4px; border-radius: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.tab-ico { font-size: 1.15rem; line-height: 1; }
+.tab.active { color: var(--rose-deep); background: var(--chip-soft); }
+
+/* ---------- Karten ---------- */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.card .section-title { margin-bottom: 10px; }
+
+/* ---------- Heute: Gruß & Spruch ---------- */
+.greeting { text-align: center; margin: 6px 0 14px; }
+.greeting .hello { font-family: 'Great Vibes', cursive; font-size: 2rem; color: var(--rose-deep); }
+.greeting .date { color: var(--ink-soft); font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; margin-top: 2px; }
+
+.quote-card {
+  background: linear-gradient(135deg, var(--chip-soft), var(--card));
+  text-align: center;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.12rem;
+  font-style: italic;
+  padding: 18px 22px;
+}
+.quote-card .q-heart { display: block; color: var(--rose); font-style: normal; margin-bottom: 4px; }
+
+/* ---------- Fortschritt ---------- */
+.progress-card { display: flex; align-items: center; gap: 14px; }
+.progress-track { flex: 1; height: 10px; background: var(--chip-soft); border-radius: 99px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--rose), var(--rose-deep)); border-radius: 99px; transition: width 0.5s ease; }
+.progress-label { font-size: 0.8rem; color: var(--ink-soft); white-space: nowrap; }
+.progress-done { font-family: 'Great Vibes', cursive; font-size: 1.25rem; color: var(--rose-deep); }
+
+/* ---------- Checklisten ---------- */
+.check-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 4px;
+  border-bottom: 1px dashed var(--line);
+  cursor: pointer; user-select: none; -webkit-user-select: none;
+}
+.check-item:last-child { border-bottom: none; }
+.check-box {
+  width: 24px; height: 24px; min-width: 24px;
+  border: 1.5px solid var(--gold);
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; color: transparent;
+  transition: all 0.18s ease;
+  background: #fff;
+}
+.check-item.done .check-box { background: var(--rose); border-color: var(--rose); color: #fff; }
+.check-label { flex: 1; }
+.check-item.done .check-label { color: var(--ink-soft); text-decoration: line-through; text-decoration-color: var(--rose); }
+.check-note { font-size: 0.72rem; color: var(--ink-soft); background: var(--chip-soft); padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+
+.empty-note { color: var(--ink-soft); font-size: 0.85rem; font-style: italic; padding: 6px 2px; }
+
+/* ---------- 15-Minuten-Zone ---------- */
+.zone-card { text-align: center; background: linear-gradient(135deg, var(--chip-soft), var(--card)); }
+.zone-desc { color: var(--ink-soft); font-size: 0.85rem; margin: 6px 0 12px; }
+.zone-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.timer-display { font-family: 'Cormorant Garamond', serif; font-size: 2rem; font-weight: 600; letter-spacing: 0.06em; min-width: 110px; }
+.timer-display.running { color: var(--rose-deep); }
+
+/* ---------- Buttons ---------- */
+.btn {
+  font-family: 'Montserrat', sans-serif; font-size: 0.8rem; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  border: 1.5px solid var(--gold); background: #fff; color: var(--ink);
+  padding: 9px 18px; border-radius: 99px; cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn:active { transform: scale(0.97); }
+.btn.primary { background: var(--rose); border-color: var(--rose); color: #fff; }
+.btn.subtle { border-color: var(--line); color: var(--ink-soft); font-weight: 500; }
+.btn.small { padding: 5px 12px; font-size: 0.7rem; }
+.btn.danger { border-color: #d8a0a0; color: #b06060; }
+
+/* ---------- Woche ---------- */
+.week-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 900px) {
+  .app { max-width: 1400px; }
+  .week-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .day-card { min-width: 0; }
+}
+.day-card { padding: 12px; }
+.day-card.today { border-color: var(--rose); box-shadow: 0 4px 18px rgba(214, 158, 150, 0.25); }
+.day-title {
+  font-family: 'Cormorant Garamond', serif; letter-spacing: 0.16em; text-transform: uppercase;
+  font-weight: 600; font-size: 0.9rem;
+  background: var(--chip); border-radius: 8px; text-align: center; padding: 4px; margin-bottom: 8px;
+}
+.day-card.today .day-title { background: var(--rose); color: #fff; }
+.day-card .check-item { padding: 6px 2px; font-size: 0.88rem; }
+.day-card .check-box { width: 20px; height: 20px; min-width: 20px; font-size: 12px; }
+.skip-week { opacity: 0.45; }
+
+/* ---------- Regeln ---------- */
+.rule-item { display: flex; gap: 10px; padding: 8px 2px; border-bottom: 1px dashed var(--line); }
+.rule-item:last-child { border-bottom: none; }
+.rule-heart { color: var(--rose-deep); }
+.projekt-text { color: var(--ink); font-size: 0.92rem; white-space: pre-line; }
+
+/* ---------- Einstellungen ---------- */
+.settings-row { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px dashed var(--line); }
+.settings-row:last-child { border-bottom: none; }
+.settings-row .grow { flex: 1; }
+.settings-sub { color: var(--ink-soft); font-size: 0.78rem; }
+.badge { font-size: 0.68rem; background: var(--chip-soft); border-radius: 99px; padding: 2px 8px; color: var(--ink-soft); }
+.sync-status { font-size: 0.85rem; }
+.sync-status.ok { color: #7d9a6e; }
+.sync-status.off { color: var(--ink-soft); }
+
+/* ---------- Modal ---------- */
+.modal-wrap {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(70, 55, 40, 0.35);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal {
+  background: var(--card); border-radius: var(--radius);
+  padding: 20px; width: 100%; max-width: 420px;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  max-height: 85vh; overflow-y: auto;
+}
+.modal h3 { font-family: 'Cormorant Garamond', serif; letter-spacing: 0.12em; text-transform: uppercase; font-size: 1rem; margin-bottom: 14px; }
+.modal label { display: block; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 12px 0 4px; }
+.modal input[type="text"], .modal select, .modal textarea, .login-card input {
+  width: 100%; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: 10px;
+  font-family: 'Montserrat', sans-serif; font-size: 0.95rem;
+  background: #fff; color: var(--ink);
+}
+.modal textarea { min-height: 110px; resize: vertical; }
+.modal input:focus, .modal select:focus, .modal textarea:focus, .login-card input:focus { outline: none; border-color: var(--rose); }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+
+/* ---------- Login ---------- */
+.login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.login-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 30px; width: 100%; max-width: 380px;
+  display: flex; flex-direction: column; gap: 12px; text-align: center;
+}
+.login-sub { color: var(--ink-soft); font-size: 0.9rem; }
+.login-error { color: #b06060; font-size: 0.82rem; min-height: 1em; }
+
+/* ---------- Herz-Konfetti ---------- */
+.hearts { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+.hearts span {
+  position: absolute; top: -5vh;
+  animation: fall linear forwards;
+  color: var(--rose);
+}
+@keyframes fall {
+  to { transform: translateY(110vh) rotate(300deg); opacity: 0.2; }
+}
+
+/* ---------- Feier-Banner ---------- */
+.celebrate-banner {
+  text-align: center;
+  background: linear-gradient(135deg, #f8e6de, var(--chip-soft));
+  border-color: var(--rose);
+}
+.celebrate-banner .script.big { font-size: 1.7rem; color: var(--rose-deep); }
+.celebrate-sub { color: var(--ink-soft); font-size: 0.85rem; margin-top: 2px; }

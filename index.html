@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Betriebssystem Laura ♡</title>
+  <meta name="description" content="Dein liebevoller Tagesbegleiter – Wochenplan, Routinen &amp; Time to Grow.">
+  <meta name="theme-color" content="#faf4ec">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Laura ♡">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Great+Vibes&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Login (nur im Cloud-Modus sichtbar) -->
+  <div id="login" class="login hidden">
+    <div class="login-card">
+      <h1 class="brand">Betriebssystem <span class="script">Laura</span> <span class="heart">♡</span></h1>
+      <p class="login-sub">Schön, dass du da bist.</p>
+      <input id="login-email" type="email" placeholder="E-Mail" autocomplete="username">
+      <input id="login-pass" type="password" placeholder="Passwort" autocomplete="current-password">
+      <button id="login-btn" class="btn primary">Anmelden ♡</button>
+      <p id="login-error" class="login-error"></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <h1 class="brand">Betriebssystem <span class="script">Laura</span> <span class="heart">♡</span></h1>
+      <p id="top-sub" class="top-sub"></p>
+    </header>
+
+    <main id="view" class="view"></main>
+
+    <footer class="motto"><span class="heart">♡</span> <span class="script big">Du machst das großartig!</span></footer>
+
+    <nav class="tabbar">
+      <button data-tab="heute" class="tab active"><span class="tab-ico">☀</span>Heute</button>
+      <button data-tab="woche" class="tab"><span class="tab-ico">▦</span>Woche</button>
+      <button data-tab="regeln" class="tab"><span class="tab-ico">♡</span>Regeln</button>
+      <button data-tab="einstellungen" class="tab"><span class="tab-ico">✎</span>Anpassen</button>
+    </nav>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal-wrap" class="modal-wrap hidden">
+    <div id="modal" class="modal"></div>
+  </div>
+
+  <!-- Herz-Konfetti -->
+  <div id="hearts" class="hearts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="data.js"></script>
+  <script src="store.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
