@@ -1,5 +1,5 @@
 /* Service Worker — App-Shell offline verfügbar machen */
-const CACHE = 'bsl-v1';
+const CACHE = 'bsl-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'data.js', 'store.js', 'config.js',
   'manifest.webmanifest',
@@ -34,10 +34,10 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // App-Shell: Netz zuerst (frische Version), Cache als Fallback
+  // App-Shell: Netz zuerst mit Revalidierung (frische Version), Cache als Fallback
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(e.request).then(res => {
+      fetch(e.request.url, { cache: 'no-cache' }).then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));
         return res;

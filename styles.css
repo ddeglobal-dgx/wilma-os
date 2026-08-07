@@ -256,6 +256,20 @@ h2.section-title {
   to { transform: translateY(110vh) rotate(300deg); opacity: 0.2; }
 }
 
+/* ---------- Update-Banner ---------- */
+.update-banner {
+  position: fixed; top: max(10px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  z-index: 90;
+  border: none; cursor: pointer;
+  background: var(--rose); color: #fff;
+  font-family: 'Montserrat', sans-serif; font-size: 0.8rem; font-weight: 600;
+  padding: 10px 18px; border-radius: 99px;
+  box-shadow: 0 6px 20px rgba(192, 128, 118, 0.45);
+  max-width: 92vw;
+  animation: banner-in 0.4s ease;
+}
+@keyframes banner-in { from { transform: translate(-50%, -20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
 /* ---------- Feier-Banner ---------- */
 .celebrate-banner {
   text-align: center;

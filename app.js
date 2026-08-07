@@ -1,5 +1,7 @@
 /* ============ Betriebssystem Laura — App-Logik ============ */
 
+const APP_VERSION = '1.1.0';
+
 let store = null;
 let currentTab = 'heute';
 let dayWasComplete = false;
@@ -44,6 +46,11 @@ function isChecked(day, key) { return !!(store.state.checks[day] && store.state.
 async function toggleCheck(day, key) {
   const on = !isChecked(day, key);
   await store.setCheck(day, key, on);
+  // Zone abgehakt → Timer ist damit erledigt und stoppt
+  if (key === 'zone' && on && day === todayISO()) {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    timerPaused = false; timerSecondsLeft = 15 * 60;
+  }
   render();
   if (on) maybeCelebrate();
 }
@@ -144,18 +151,22 @@ function renderHeute() {
   const timerRunning = timerInterval !== null;
   const timerStarted = timerRunning || timerPaused;
   const mainLabel = timerRunning ? 'Pause' : (timerPaused ? 'Weiter ♡' : 'Timer starten');
-  const zoneHTML = `
-    <div class="card zone-card">
-      <h2 class="section-title">♡ 15-Minuten-Zone</h2>
-      <p class="zone-desc">Ein Bereich, 15 Minuten, Timer an – mehr nicht.</p>
-      <div class="zone-row">
+  const zoneDone = isChecked(day, 'zone');
+  const timerBlock = zoneDone
+    ? '<p class="zone-desc" style="margin:4px 0 2px">Für heute geschafft ♡</p>'
+    : `<div class="zone-row">
         <div class="timer-display ${timerRunning ? 'running' : ''} ${timerPaused ? 'paused' : ''}" id="timer-display">
           ${mins}:${String(secs).padStart(2, '0')}
         </div>
         <button class="btn ${timerRunning ? '' : 'primary'}" id="timer-btn">${mainLabel}</button>
         ${timerStarted ? '<button class="btn subtle" id="timer-reset">Zurücksetzen</button>' : ''}
       </div>
-      ${timerPaused ? '<p class="zone-desc" style="margin-top:8px">Pausiert – dein Fortschritt wartet auf dich. ♡</p>' : ''}
+      ${timerPaused ? '<p class="zone-desc" style="margin-top:8px">Pausiert – dein Fortschritt wartet auf dich. ♡</p>' : ''}`;
+  const zoneHTML = `
+    <div class="card zone-card">
+      <h2 class="section-title">♡ 15-Minuten-Zone</h2>
+      <p class="zone-desc">Ein Bereich, 15 Minuten, Timer an – mehr nicht.</p>
+      ${timerBlock}
       <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft')}</div>
     </div>`;
 
@@ -273,6 +284,7 @@ function renderEinstellungen() {
     <div class="card">
       <h2 class="section-title">App</h2>
       <p style="margin-bottom:8px">${sync}</p>
+      <p class="settings-sub" style="margin-bottom:8px">Version ${APP_VERSION} · Die App sucht selbst nach Updates und sagt dir Bescheid. ♡</p>
       <p class="settings-sub">Tipp: In Safari über „Teilen → Zum Home-Bildschirm" installieren, dann fühlt sich die App wie eine echte App an. ♡</p>
     </div>`;
 
@@ -554,6 +566,39 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && store) render();
 });
+
+/* ---------- Update-Erkennung ---------- */
+let updateBannerShown = false;
+async function checkForUpdate() {
+  try {
+    const res = await fetch('version.json?_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const j = await res.json();
+    if (j.v && j.v !== APP_VERSION && !updateBannerShown) {
+      updateBannerShown = true;
+      const b = document.createElement('button');
+      b.className = 'update-banner';
+      b.textContent = '✨ Ein kleines Update ist da – antippen zum Aktualisieren ♡';
+      b.onclick = async () => {
+        try {
+          if (window.caches) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+          }
+          if (navigator.serviceWorker) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.update()));
+          }
+        } catch (e) {}
+        location.reload();
+      };
+      document.body.appendChild(b);
+    }
+  } catch (e) { /* offline o. ä. — still bleiben */ }
+}
+setInterval(checkForUpdate, 5 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+checkForUpdate();
 
 // Service Worker
 if ('serviceWorker' in navigator) {
