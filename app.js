@@ -4,7 +4,8 @@ let store = null;
 let currentTab = 'heute';
 let dayWasComplete = false;
 let timerInterval = null;
-let timerSecondsLeft = 0;
+let timerSecondsLeft = 15 * 60;
+let timerPaused = false;
 
 const WEEKDAY_NAMES = ['', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
 
@@ -141,16 +142,20 @@ function renderHeute() {
 
   const mins = Math.floor(timerSecondsLeft / 60), secs = timerSecondsLeft % 60;
   const timerRunning = timerInterval !== null;
+  const timerStarted = timerRunning || timerPaused;
+  const mainLabel = timerRunning ? 'Pause' : (timerPaused ? 'Weiter ♡' : 'Timer starten');
   const zoneHTML = `
     <div class="card zone-card">
       <h2 class="section-title">♡ 15-Minuten-Zone</h2>
       <p class="zone-desc">Ein Bereich, 15 Minuten, Timer an – mehr nicht.</p>
       <div class="zone-row">
-        <div class="timer-display ${timerRunning ? 'running' : ''}" id="timer-display">
-          ${timerRunning || timerSecondsLeft > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : '15:00'}
+        <div class="timer-display ${timerRunning ? 'running' : ''} ${timerPaused ? 'paused' : ''}" id="timer-display">
+          ${mins}:${String(secs).padStart(2, '0')}
         </div>
-        <button class="btn ${timerRunning ? '' : 'primary'}" id="timer-btn">${timerRunning ? 'Stopp' : 'Timer starten'}</button>
+        <button class="btn ${timerRunning ? '' : 'primary'}" id="timer-btn">${mainLabel}</button>
+        ${timerStarted ? '<button class="btn subtle" id="timer-reset">Zurücksetzen</button>' : ''}
       </div>
+      ${timerPaused ? '<p class="zone-desc" style="margin-top:8px">Pausiert – dein Fortschritt wartet auf dich. ♡</p>' : ''}
       <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft')}</div>
     </div>`;
 
@@ -410,26 +415,37 @@ function projektzeitModal() {
   };
 }
 
-/* ---------- Timer ---------- */
+/* ---------- Timer (Start / Pause / Weiter / Zurücksetzen) ---------- */
+function startTimerTick() {
+  timerInterval = setInterval(() => {
+    timerSecondsLeft--;
+    const el = document.getElementById('timer-display');
+    if (el) {
+      const m = Math.floor(timerSecondsLeft / 60), s = timerSecondsLeft % 60;
+      el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+    }
+    if (timerSecondsLeft <= 0) {
+      clearInterval(timerInterval); timerInterval = null;
+      timerPaused = false; timerSecondsLeft = 15 * 60;
+      rainHearts(25);
+      render();
+    }
+  }, 1000);
+}
 function toggleTimer() {
   if (timerInterval) {
-    clearInterval(timerInterval); timerInterval = null; timerSecondsLeft = 0;
+    // läuft → pausieren (Stand bleibt erhalten)
+    clearInterval(timerInterval); timerInterval = null; timerPaused = true;
   } else {
-    timerSecondsLeft = 15 * 60;
-    timerInterval = setInterval(() => {
-      timerSecondsLeft--;
-      const el = document.getElementById('timer-display');
-      if (el) {
-        const m = Math.floor(timerSecondsLeft / 60), s = timerSecondsLeft % 60;
-        el.textContent = `${m}:${String(s).padStart(2, '0')}`;
-      }
-      if (timerSecondsLeft <= 0) {
-        clearInterval(timerInterval); timerInterval = null;
-        rainHearts(25);
-        render();
-      }
-    }, 1000);
+    // startet neu oder läuft weiter
+    timerPaused = false;
+    startTimerTick();
   }
+  render();
+}
+function resetTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  timerPaused = false; timerSecondsLeft = 15 * 60;
   render();
 }
 
@@ -457,6 +473,8 @@ function render() {
   });
   const timerBtn = document.getElementById('timer-btn');
   if (timerBtn) timerBtn.onclick = toggleTimer;
+  const timerReset = document.getElementById('timer-reset');
+  if (timerReset) timerReset.onclick = resetTimer;
 
   view.querySelectorAll('[data-add-task]').forEach(b => b.onclick = () => taskModal(null, Number(b.dataset.addTask)));
   view.querySelectorAll('[data-edit-task]').forEach(b => b.onclick = () => {

@@ -159,6 +159,7 @@ h2.section-title {
 .zone-row { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
 .timer-display { font-family: 'Cormorant Garamond', serif; font-size: 2rem; font-weight: 600; letter-spacing: 0.06em; min-width: 110px; }
 .timer-display.running { color: var(--rose-deep); }
+.timer-display.paused { color: var(--gold); }
 
 /* ---------- Buttons ---------- */
 .btn {
