@@ -6,5 +6,5 @@
    1. Supabase-Projekt anlegen (siehe ANLEITUNG.md)
    2. Project URL und anon/publishable Key hier eintragen
 */
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://lcdlotidyarunuafonvp.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_NUv6jBYfyiBuODE671WRqw_d6E0VnNn';
