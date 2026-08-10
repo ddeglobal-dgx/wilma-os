@@ -169,11 +169,28 @@ class CloudStore {
   }
 
   async _seed() {
-    const d = buildDefaultState();
-    await this.sb.from('tasks').insert(d.tasks);
-    await this.sb.from('routine_items').insert(d.routines);
-    await this.sb.from('rules').insert(d.rules);
-    await this.sb.from('settings').upsert({ key: 'projektzeit', value: { v: DEFAULT_PROJEKTZEIT } });
+    // Erstes Gerät, das sich anmeldet, füllt die Cloud — bevorzugt mit seinen
+    // bestehenden lokalen Daten (Häkchen, Budgets bleiben erhalten), sonst Standard.
+    const localRaw = localStorage.getItem(LS_KEY);
+    const d = migrateState(localRaw ? JSON.parse(localRaw) : buildDefaultState());
+    if (d.tasks.length) await this.sb.from('tasks').insert(d.tasks);
+    if (d.routines.length) await this.sb.from('routine_items').insert(d.routines);
+    if (d.rules.length) await this.sb.from('rules').insert(d.rules);
+    await this.sb.from('settings').upsert({ key: 'projektzeit', value: { v: d.settings.projektzeit || DEFAULT_PROJEKTZEIT } });
+
+    const checkRows = [];
+    for (const day of Object.keys(d.checks)) {
+      for (const item_key of Object.keys(d.checks[day])) checkRows.push({ day, item_key });
+    }
+    if (checkRows.length) await this.sb.from('checks').upsert(checkRows);
+
+    if (d.budgetCats.length) await this.sb.from('budget_categories').insert(d.budgetCats);
+    const budgetRows = [];
+    for (const month of Object.keys(d.budgets)) {
+      for (const [cat_id, amount] of Object.entries(d.budgets[month])) budgetRows.push({ month, cat_id, amount });
+    }
+    if (budgetRows.length) await this.sb.from('budgets').upsert(budgetRows);
+    if (d.expenses.length) await this.sb.from('expenses').insert(d.expenses);
   }
 
   _subscribe() {
