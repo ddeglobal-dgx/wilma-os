@@ -1,6 +1,6 @@
 /* ============ Betriebssystem Laura — App-Logik ============ */
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 
 let store = null;
 let currentTab = 'heute';
@@ -293,6 +293,207 @@ function renderEinstellungen() {
     ${rulesBlock}${infoBlock}`;
 }
 
+/* ---------- Budget ---------- */
+let budgetMonth = null;
+const CAT_PASTELS = ['#f8e3d1', '#f5d8d3', '#f4ecc9', '#d9ece7', '#e4def2', '#f7e0ea'];
+
+function monthKeyOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
+function monthLabel(key) {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+}
+function shiftMonth(key, delta) {
+  const [y, m] = key.split('-').map(Number);
+  return monthKeyOf(new Date(y, m - 1 + delta, 1));
+}
+function euro(cents) { return (cents / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }); }
+function parseEuro(s) {
+  s = String(s).trim().replace(/€/g, '').trim();
+  if (!s) return null;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s);
+  return (isNaN(n) || n < 0) ? null : Math.round(n * 100);
+}
+function ensureMonthBudgets(month) {
+  const b = store.state.budgets;
+  if (b[month]) return;
+  const prev = Object.keys(b).filter(k => k < month && Object.keys(b[k]).length).sort().pop();
+  if (prev) store.copyBudgets(month, b[prev]);
+  else b[month] = {};
+}
+function monthExpensesFor(month) {
+  return store.state.expenses.filter(e => (e.day || '').startsWith(month));
+}
+
+function renderBudget() {
+  if (!budgetMonth) budgetMonth = monthKeyOf(new Date());
+  ensureMonthBudgets(budgetMonth);
+  const cats = store.state.budgetCats.filter(c => c.active).sort((a, b) => a.pos - b.pos);
+  const budgets = store.state.budgets[budgetMonth] || {};
+  const monthExpenses = monthExpensesFor(budgetMonth);
+  const spent = {};
+  for (const e of monthExpenses) spent[e.cat_id] = (spent[e.cat_id] || 0) + e.amount;
+  const totalBudget = cats.reduce((s, c) => s + (budgets[c.id] || 0), 0);
+  const totalSpent = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const totalLeft = totalBudget - totalSpent;
+
+  const nav = `
+    <div class="month-nav">
+      <button class="btn small subtle" id="bm-prev">‹</button>
+      <div class="month-label">${monthLabel(budgetMonth)}</div>
+      <button class="btn small subtle" id="bm-next">›</button>
+    </div>`;
+
+  const summary = cats.length ? `
+    <div class="card budget-summary">
+      <div class="bs-row">
+        <span>${euro(totalSpent)} von ${euro(totalBudget)}</span>
+        <span class="${totalLeft < 0 ? 'over-text' : ''}">${totalLeft < 0 ? euro(-totalLeft) + ' drüber' : euro(totalLeft) + ' übrig'}</span>
+      </div>
+      <div class="cat-bar"><div class="cat-fill ${totalBudget && totalSpent > totalBudget ? 'over' : ''}"
+        style="width:${totalBudget ? Math.min(100, totalSpent / totalBudget * 100) : 0}%"></div></div>
+    </div>` : '';
+
+  const catCards = cats.map((c, i) => {
+    const bud = budgets[c.id] || 0;
+    const sp = spent[c.id] || 0;
+    const left = bud - sp;
+    const n = monthExpenses.filter(e => e.cat_id === c.id).length;
+    const pct = bud ? Math.min(100, sp / bud * 100) : (sp > 0 ? 100 : 0);
+    const stateCls = bud && sp > bud ? 'over' : (bud && sp / bud >= 0.9 ? 'warn' : '');
+    return `
+      <div class="card budget-cat" data-cat="${c.id}">
+        <div class="cat-emoji" style="background:${CAT_PASTELS[i % CAT_PASTELS.length]}">${esc(c.emoji || '♡')}</div>
+        <div class="cat-main">
+          <div class="cat-name">${esc(c.name)} <span class="badge">${n} ${n === 1 ? 'Eintrag' : 'Einträge'}</span></div>
+          <div class="cat-bar"><div class="cat-fill ${stateCls}" style="width:${pct}%"></div></div>
+          <div class="cat-sub">${euro(sp)} von ${euro(bud)} · <span class="${left < 0 ? 'over-text' : ''}">${left < 0 ? euro(-left) + ' drüber' : euro(left) + ' übrig'}</span></div>
+        </div>
+        <button class="btn small subtle" data-edit-cat="${c.id}">✎</button>
+      </div>`;
+  }).join('');
+
+  const empty = cats.length ? '' : `
+    <div class="card" style="text-align:center">
+      <p class="empty-note">Leg deine erste Kategorie an – z. B. Taschengeld, Drogerie oder Hund 🐾<br>Dann kannst du jede Ausgabe eintragen und siehst sofort, wie viel noch übrig ist. ♡</p>
+    </div>`;
+
+  const actions = `
+    <div class="budget-actions">
+      ${cats.length ? '<button class="btn primary" id="add-expense">+ Ausgabe</button>' : ''}
+      <button class="btn" id="add-cat">+ Kategorie</button>
+    </div>`;
+
+  return nav + summary + catCards + empty + actions;
+}
+
+function catDetailModal(cat) {
+  const list = monthExpensesFor(budgetMonth)
+    .filter(e => e.cat_id === cat.id)
+    .sort((a, b) => b.day.localeCompare(a.day));
+  const budgets = store.state.budgets[budgetMonth] || {};
+  const bud = budgets[cat.id] || 0;
+  const sp = list.reduce((s, e) => s + e.amount, 0);
+  openModal(`
+    <h3>${esc(cat.emoji || '♡')} ${esc(cat.name)} · ${monthLabel(budgetMonth)}</h3>
+    <p class="cat-sub" style="margin-bottom:8px">${euro(sp)} von ${euro(bud)} · ${bud - sp < 0 ? euro(sp - bud) + ' drüber' : euro(bud - sp) + ' übrig'}</p>
+    ${list.length ? list.map(e => `
+      <div class="expense-row">
+        <span class="exp-day">${e.day.slice(8, 10)}.${e.day.slice(5, 7)}.</span>
+        <span class="grow">${esc(e.note || '–')}</span>
+        <span class="exp-amount">${euro(e.amount)}</span>
+        <button class="btn small danger" data-del-exp="${e.id}">×</button>
+      </div>`).join('') : '<p class="empty-note">Noch keine Ausgaben in diesem Monat.</p>'}
+    <div class="modal-actions">
+      <button class="btn small subtle" id="m-cancel">Schließen</button>
+      <button class="btn small" id="m-edit-cat">Bearbeiten</button>
+      <button class="btn small primary" id="m-add-exp">+ Ausgabe ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-edit-cat').onclick = () => { closeModal(); budgetCatModal(cat); };
+  document.getElementById('m-add-exp').onclick = () => { closeModal(); expenseModal(cat.id); };
+  document.querySelectorAll('[data-del-exp]').forEach(b => b.onclick = async () => {
+    await store.deleteExpense(b.dataset.delExp);
+    closeModal(); render(); catDetailModal(cat);
+  });
+}
+
+function budgetCatModal(cat) {
+  const isNew = !cat;
+  const budgets = store.state.budgets[budgetMonth] || {};
+  const curBudget = cat ? (budgets[cat.id] || 0) : 0;
+  openModal(`
+    <h3>${isNew ? 'Neue Kategorie' : 'Kategorie bearbeiten'}</h3>
+    <label>Name</label>
+    <input type="text" id="m-name" value="${cat ? esc(cat.name) : ''}" placeholder="z. B. Taschengeld">
+    <label>Symbol (Emoji)</label>
+    <input type="text" id="m-emoji" value="${cat ? esc(cat.emoji || '') : ''}" placeholder="z. B. 🛍️" maxlength="4">
+    <label>Budget für ${monthLabel(budgetMonth)} (€)</label>
+    <input type="text" id="m-budget" inputmode="decimal" value="${curBudget ? (curBudget / 100).toLocaleString('de-DE') : ''}" placeholder="z. B. 100">
+    <div class="modal-actions">
+      ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Speichern ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const name = document.getElementById('m-name').value.trim();
+    if (!name) return;
+    const emoji = document.getElementById('m-emoji').value.trim() || '♡';
+    const cents = parseEuro(document.getElementById('m-budget').value) || 0;
+    let id;
+    if (isNew) {
+      const row = await store.addBudgetCat({ name, emoji });
+      id = row.id;
+    } else {
+      await store.updateBudgetCat(cat.id, { name, emoji });
+      id = cat.id;
+    }
+    await store.setBudget(budgetMonth, id, cents);
+    closeModal(); render();
+  };
+  if (!isNew) document.getElementById('m-delete').onclick = async () => {
+    if (!confirm(`„${cat.name}" und alle zugehörigen Ausgaben löschen?`)) return;
+    await store.deleteBudgetCat(cat.id);
+    closeModal(); render();
+  };
+}
+
+function expenseModal(prefillCatId) {
+  const cats = store.state.budgetCats.filter(c => c.active).sort((a, b) => a.pos - b.pos);
+  if (!cats.length) return;
+  openModal(`
+    <h3>Neue Ausgabe</h3>
+    <label>Betrag (€)</label>
+    <input type="text" id="m-amount" inputmode="decimal" placeholder="z. B. 12,50" autofocus>
+    <label>Kategorie</label>
+    <select id="m-cat">
+      ${cats.map(c => `<option value="${c.id}" ${c.id === prefillCatId ? 'selected' : ''}>${esc(c.emoji || '♡')} ${esc(c.name)}</option>`).join('')}
+    </select>
+    <label>Notiz (optional)</label>
+    <input type="text" id="m-note" placeholder="z. B. dm-Einkauf">
+    <label>Datum</label>
+    <input type="date" id="m-day" value="${todayISO()}">
+    <div class="modal-actions">
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Eintragen ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const amount = parseEuro(document.getElementById('m-amount').value);
+    if (!amount) { document.getElementById('m-amount').focus(); return; }
+    const day = document.getElementById('m-day').value || todayISO();
+    await store.addExpense({
+      cat_id: document.getElementById('m-cat').value,
+      amount,
+      note: document.getElementById('m-note').value.trim(),
+      day,
+    });
+    budgetMonth = day.slice(0, 7);
+    closeModal(); render();
+  };
+}
+
 /* ---------- Modals ---------- */
 function openModal(html) {
   const wrap = document.getElementById('modal-wrap');
@@ -466,12 +667,14 @@ function render() {
   const view = document.getElementById('view');
   if (currentTab === 'heute') view.innerHTML = renderHeute();
   else if (currentTab === 'woche') view.innerHTML = renderWoche();
+  else if (currentTab === 'budget') view.innerHTML = renderBudget();
   else if (currentTab === 'regeln') view.innerHTML = renderRegeln();
   else view.innerHTML = renderEinstellungen();
 
   const now = new Date();
   document.getElementById('top-sub').textContent =
     currentTab === 'woche' ? 'Wochenplan Haushalt' :
+    currentTab === 'budget' ? 'Dein Geld im Blick' :
     currentTab === 'regeln' ? 'Meine Regeln & Projektzeit' :
     currentTab === 'einstellungen' ? 'Alles nach deinem Geschmack' :
     'Dein Tag · ' + now.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
@@ -503,6 +706,23 @@ function render() {
   });
   const pz = document.getElementById('edit-projektzeit');
   if (pz) pz.onclick = projektzeitModal;
+
+  // Budget-Events
+  const bmPrev = document.getElementById('bm-prev');
+  if (bmPrev) bmPrev.onclick = () => { budgetMonth = shiftMonth(budgetMonth, -1); render(); };
+  const bmNext = document.getElementById('bm-next');
+  if (bmNext) bmNext.onclick = () => { budgetMonth = shiftMonth(budgetMonth, 1); render(); };
+  const addExp = document.getElementById('add-expense');
+  if (addExp) addExp.onclick = () => expenseModal();
+  const addCat = document.getElementById('add-cat');
+  if (addCat) addCat.onclick = () => budgetCatModal(null);
+  view.querySelectorAll('[data-edit-cat]').forEach(b => b.onclick = (ev) => {
+    ev.stopPropagation();
+    budgetCatModal(store.state.budgetCats.find(c => c.id === b.dataset.editCat));
+  });
+  view.querySelectorAll('.budget-cat[data-cat]').forEach(el => el.onclick = () => {
+    catDetailModal(store.state.budgetCats.find(c => c.id === el.dataset.cat));
+  });
 }
 
 document.querySelectorAll('.tab').forEach(btn => {

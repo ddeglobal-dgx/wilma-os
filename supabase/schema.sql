@@ -49,20 +49,49 @@ create table if not exists public.settings (
   updated_at timestamptz not null default now()
 );
 
+-- Budget: Kategorien (von Laura selbst angelegt)
+create table if not exists public.budget_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  emoji text not null default '♡',
+  pos int not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+-- Budget: Monatsbudgets je Kategorie (Betrag in Cent)
+create table if not exists public.budgets (
+  month text not null,                 -- 'YYYY-MM'
+  cat_id uuid not null references public.budget_categories(id) on delete cascade,
+  amount int not null check (amount >= 0),
+  primary key (month, cat_id)
+);
+
+-- Budget: Ausgaben (Betrag in Cent)
+create table if not exists public.expenses (
+  id uuid primary key default gen_random_uuid(),
+  cat_id uuid not null references public.budget_categories(id) on delete cascade,
+  amount int not null check (amount > 0),
+  note text not null default '',
+  day date not null,
+  created_at timestamptz not null default now()
+);
+
 -- ---------- RLS: nur angemeldete Nutzer (= Laura & Dennis) ----------
 do $$
+declare t text;
 begin
-  execute 'alter table public.tasks enable row level security';
-  execute 'alter table public.routine_items enable row level security';
-  execute 'alter table public.rules enable row level security';
-  execute 'alter table public.checks enable row level security';
-  execute 'alter table public.settings enable row level security';
+  foreach t in array array['tasks','routine_items','rules','checks','settings',
+                          'budget_categories','budgets','expenses'] loop
+    execute format('alter table public.%I enable row level security', t);
+  end loop;
 end $$;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['tasks','routine_items','rules','checks','settings'] loop
+  foreach t in array array['tasks','routine_items','rules','checks','settings',
+                          'budget_categories','budgets','expenses'] loop
     execute format('drop policy if exists "auth_all_%s" on public.%I', t, t);
     execute format(
       'create policy "auth_all_%s" on public.%I for all to authenticated using (true) with check (true)',
@@ -73,27 +102,15 @@ end $$;
 
 -- ---------- Realtime: Geräte halten sich gegenseitig aktuell ----------
 do $$
+declare t text;
 begin
-  begin
-    alter publication supabase_realtime add table public.tasks;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.routine_items;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.rules;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.checks;
-  exception when duplicate_object then null;
-  end;
-  begin
-    alter publication supabase_realtime add table public.settings;
-  exception when duplicate_object then null;
-  end;
+  foreach t in array array['tasks','routine_items','rules','checks','settings',
+                          'budget_categories','budgets','expenses'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when duplicate_object then null;
+    end;
+  end loop;
 end $$;
 
 -- Hinweis: Die Startdaten (Lauras Wochenplan, Routinen, Regeln) trägt die App

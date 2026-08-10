@@ -19,7 +19,17 @@ function buildDefaultState() {
     rules: DEFAULT_RULES.map((text, i) => ({ id: newId(), text, pos: i })),
     checks: {},   // { '2026-08-07': { 'task:<id>': true, 'zone': true } }
     settings: { projektzeit: DEFAULT_PROJEKTZEIT },
+    budgetCats: [],   // [{ id, name, emoji, pos, active }]
+    budgets: {},      // { '2026-08': { <catId>: amountCents } }
+    expenses: [],     // [{ id, cat_id, amount (Cent), note, day 'YYYY-MM-DD' }]
   };
+}
+
+function migrateState(state) {
+  if (!state.budgetCats) state.budgetCats = [];
+  if (!state.budgets) state.budgets = {};
+  if (!state.expenses) state.expenses = [];
+  return state;
 }
 
 /* ---------- Lokaler Speicher ---------- */
@@ -28,7 +38,7 @@ class LocalStore {
 
   async init() {
     const raw = localStorage.getItem(LS_KEY);
-    this.state = raw ? JSON.parse(raw) : buildDefaultState();
+    this.state = migrateState(raw ? JSON.parse(raw) : buildDefaultState());
     this._save();
   }
   _save() { localStorage.setItem(LS_KEY, JSON.stringify(this.state)); }
@@ -72,6 +82,37 @@ class LocalStore {
   }
 
   async setSetting(key, value) { this.state.settings[key] = value; this._save(); }
+
+  async addBudgetCat(c) {
+    const row = { id: newId(), emoji: '♡', pos: this.state.budgetCats.length, active: true, ...c };
+    this.state.budgetCats.push(row); this._save();
+    return row;
+  }
+  async updateBudgetCat(id, patch) {
+    Object.assign(this.state.budgetCats.find(c => c.id === id) || {}, patch); this._save();
+  }
+  async deleteBudgetCat(id) {
+    this.state.budgetCats = this.state.budgetCats.filter(c => c.id !== id);
+    this.state.expenses = this.state.expenses.filter(e => e.cat_id !== id);
+    for (const m of Object.keys(this.state.budgets)) delete this.state.budgets[m][id];
+    this._save();
+  }
+  async setBudget(month, catId, amountCents) {
+    const m = this.state.budgets[month] || (this.state.budgets[month] = {});
+    if (amountCents > 0) m[catId] = amountCents; else delete m[catId];
+    this._save();
+  }
+  async copyBudgets(month, map) {
+    this.state.budgets[month] = { ...map }; this._save();
+  }
+  async addExpense(e) {
+    const row = { id: newId(), note: '', ...e };
+    this.state.expenses.push(row); this._save();
+    return row;
+  }
+  async deleteExpense(id) {
+    this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._save();
+  }
 }
 
 /* ---------- Cloud-Speicher (Supabase) ---------- */
@@ -91,19 +132,22 @@ class CloudStore {
       console.warn('Cloud nicht erreichbar, nutze Cache:', e);
       this.online = false;
       const raw = localStorage.getItem(LS_KEY + '-cloudcache');
-      this.state = raw ? JSON.parse(raw) : buildDefaultState();
+      this.state = migrateState(raw ? JSON.parse(raw) : buildDefaultState());
     }
   }
 
   async _loadAll() {
-    const [tasks, routines, rules, checks, settings] = await Promise.all([
+    const [tasks, routines, rules, checks, settings, cats, budgets, expenses] = await Promise.all([
       this.sb.from('tasks').select('*').order('pos'),
       this.sb.from('routine_items').select('*').order('pos'),
       this.sb.from('rules').select('*').order('pos'),
       this.sb.from('checks').select('*'),
       this.sb.from('settings').select('*'),
+      this.sb.from('budget_categories').select('*').order('pos'),
+      this.sb.from('budgets').select('*'),
+      this.sb.from('expenses').select('*').order('day'),
     ]);
-    for (const r of [tasks, routines, rules, checks, settings]) if (r.error) throw r.error;
+    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses]) if (r.error) throw r.error;
 
     const checkMap = {};
     for (const c of checks.data) {
@@ -112,9 +156,15 @@ class CloudStore {
     const settingsMap = { projektzeit: DEFAULT_PROJEKTZEIT };
     for (const s of settings.data) settingsMap[s.key] = s.value?.v ?? s.value;
 
+    const budgetMap = {};
+    for (const b of budgets.data) {
+      (budgetMap[b.month] = budgetMap[b.month] || {})[b.cat_id] = b.amount;
+    }
+
     this.state = {
       tasks: tasks.data, routines: routines.data, rules: rules.data,
       checks: checkMap, settings: settingsMap,
+      budgetCats: cats.data, budgets: budgetMap, expenses: expenses.data,
     };
   }
 
@@ -193,5 +243,45 @@ class CloudStore {
   async setSetting(key, value) {
     this.state.settings[key] = value; this._cache();
     await this.sb.from('settings').upsert({ key, value: { v: value } });
+  }
+
+  async addBudgetCat(c) {
+    const row = { id: newId(), emoji: '♡', pos: this.state.budgetCats.length, active: true, ...c };
+    this.state.budgetCats.push(row); this._cache();
+    await this.sb.from('budget_categories').insert(row);
+    return row;
+  }
+  async updateBudgetCat(id, patch) {
+    Object.assign(this.state.budgetCats.find(c => c.id === id) || {}, patch); this._cache();
+    await this.sb.from('budget_categories').update(patch).eq('id', id);
+  }
+  async deleteBudgetCat(id) {
+    this.state.budgetCats = this.state.budgetCats.filter(c => c.id !== id);
+    this.state.expenses = this.state.expenses.filter(e => e.cat_id !== id);
+    for (const m of Object.keys(this.state.budgets)) delete this.state.budgets[m][id];
+    this._cache();
+    await this.sb.from('budget_categories').delete().eq('id', id);   // cascade löscht budgets/expenses
+  }
+  async setBudget(month, catId, amountCents) {
+    const m = this.state.budgets[month] || (this.state.budgets[month] = {});
+    if (amountCents > 0) m[catId] = amountCents; else delete m[catId];
+    this._cache();
+    if (amountCents > 0) await this.sb.from('budgets').upsert({ month, cat_id: catId, amount: amountCents });
+    else await this.sb.from('budgets').delete().eq('month', month).eq('cat_id', catId);
+  }
+  async copyBudgets(month, map) {
+    this.state.budgets[month] = { ...map }; this._cache();
+    const rows = Object.entries(map).map(([cat_id, amount]) => ({ month, cat_id, amount }));
+    if (rows.length) await this.sb.from('budgets').upsert(rows);
+  }
+  async addExpense(e) {
+    const row = { id: newId(), note: '', ...e };
+    this.state.expenses.push(row); this._cache();
+    await this.sb.from('expenses').insert(row);
+    return row;
+  }
+  async deleteExpense(id) {
+    this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._cache();
+    await this.sb.from('expenses').delete().eq('id', id);
   }
 }

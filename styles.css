@@ -194,6 +194,33 @@ h2.section-title {
 .day-card .check-box { width: 20px; height: 20px; min-width: 20px; font-size: 12px; }
 .skip-week { opacity: 0.45; }
 
+/* ---------- Budget ---------- */
+.month-nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 14px; }
+.month-label {
+  font-family: 'Cormorant Garamond', serif; letter-spacing: 0.14em; text-transform: uppercase;
+  font-weight: 600; font-size: 1rem; min-width: 170px; text-align: center;
+}
+.budget-summary .bs-row { display: flex; justify-content: space-between; font-size: 0.88rem; margin-bottom: 8px; color: var(--ink-soft); }
+.budget-cat { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+.cat-emoji {
+  width: 46px; height: 46px; min-width: 46px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+}
+.cat-main { flex: 1; min-width: 0; }
+.cat-name { font-weight: 500; margin-bottom: 5px; }
+.cat-bar { height: 8px; background: var(--chip-soft); border-radius: 99px; overflow: hidden; }
+.cat-fill { height: 100%; background: linear-gradient(90deg, var(--rose), var(--rose-deep)); border-radius: 99px; transition: width 0.4s ease; }
+.cat-fill.warn { background: linear-gradient(90deg, var(--gold), #b98d5f); }
+.cat-fill.over { background: linear-gradient(90deg, #d08a8a, #b06060); }
+.cat-sub { font-size: 0.78rem; color: var(--ink-soft); margin-top: 5px; }
+.over-text { color: #b06060; font-weight: 600; }
+.budget-actions { display: flex; justify-content: center; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.expense-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px dashed var(--line); font-size: 0.9rem; }
+.expense-row:last-of-type { border-bottom: none; }
+.exp-day { color: var(--ink-soft); font-size: 0.78rem; white-space: nowrap; }
+.exp-amount { font-weight: 600; white-space: nowrap; }
+.expense-row .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- Regeln ---------- */
 .rule-item { display: flex; gap: 10px; padding: 8px 2px; border-bottom: 1px dashed var(--line); }
 .rule-item:last-child { border-bottom: none; }
