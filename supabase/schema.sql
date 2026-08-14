@@ -77,12 +77,21 @@ create table if not exists public.expenses (
   created_at timestamptz not null default now()
 );
 
+-- Einmalige To-dos (Historie über done_at)
+create table if not exists public.todos (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  pos int not null default 0,
+  created_at timestamptz not null default now(),
+  done_at timestamptz
+);
+
 -- ---------- RLS: nur angemeldete Nutzer (= Laura & Dennis) ----------
 do $$
 declare t text;
 begin
   foreach t in array array['tasks','routine_items','rules','checks','settings',
-                          'budget_categories','budgets','expenses'] loop
+                          'budget_categories','budgets','expenses','todos'] loop
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
@@ -91,7 +100,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['tasks','routine_items','rules','checks','settings',
-                          'budget_categories','budgets','expenses'] loop
+                          'budget_categories','budgets','expenses','todos'] loop
     execute format('drop policy if exists "auth_all_%s" on public.%I', t, t);
     execute format(
       'create policy "auth_all_%s" on public.%I for all to authenticated using (true) with check (true)',
@@ -105,7 +114,7 @@ do $$
 declare t text;
 begin
   foreach t in array array['tasks','routine_items','rules','checks','settings',
-                          'budget_categories','budgets','expenses'] loop
+                          'budget_categories','budgets','expenses','todos'] loop
     begin
       execute format('alter publication supabase_realtime add table public.%I', t);
     exception when duplicate_object then null;

@@ -221,6 +221,45 @@ h2.section-title {
 .exp-amount { font-weight: 600; white-space: nowrap; }
 .expense-row .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* ---------- Verlauf ---------- */
+.seg-toggle {
+  display: flex; justify-content: center; gap: 0; margin: 4px 0 14px;
+  background: var(--chip-soft); border-radius: 99px; padding: 4px; width: fit-content; margin-left: auto; margin-right: auto;
+}
+.seg {
+  border: none; background: none; cursor: pointer;
+  font-family: 'Montserrat', sans-serif; font-size: 0.75rem; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft);
+  padding: 7px 22px; border-radius: 99px;
+}
+.seg.active { background: var(--rose); color: #fff; }
+
+.vchart { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; height: 150px; padding: 4px 2px 0; }
+.vbar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+.vbar-pct { font-size: 0.62rem; color: var(--ink-soft); }
+.vbar-track { flex: 1; width: 100%; max-width: 34px; display: flex; align-items: flex-end; background: var(--chip-soft); border-radius: 8px; overflow: hidden; }
+.vbar { width: 100%; background: linear-gradient(180deg, var(--rose), var(--rose-deep)); border-radius: 8px 8px 0 0; transition: height 0.5s ease; }
+.vbar-wrap.current .vbar { background: linear-gradient(180deg, var(--rose-deep), #a96b60); }
+.vbar-wrap.current .vbar-pct { color: var(--rose-deep); font-weight: 600; }
+.vbar-label { font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; }
+
+.trend-line { font-size: 0.85rem; color: var(--ink-soft); margin-top: 12px; text-align: center; }
+.trend.up { color: #7d9a6e; font-weight: 700; }
+.trend.down { color: #b06060; font-weight: 700; }
+.trend.flat { color: var(--gold); font-weight: 700; }
+
+.hist-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px dashed var(--line); font-size: 0.88rem; }
+.hist-row:last-of-type { border-bottom: none; }
+.hist-count { font-weight: 600; white-space: nowrap; }
+.hist-group { margin-bottom: 10px; }
+.hist-group-title {
+  font-family: 'Cormorant Garamond', serif; letter-spacing: 0.12em; text-transform: uppercase;
+  font-weight: 600; font-size: 0.85rem; margin: 8px 0 4px;
+}
+.done-title { text-decoration: line-through; text-decoration-color: var(--rose); color: var(--ink-soft); }
+
+.todo-edit { margin-left: auto; }
+
 /* ---------- Regeln ---------- */
 .rule-item { display: flex; gap: 10px; padding: 8px 2px; border-bottom: 1px dashed var(--line); }
 .rule-item:last-child { border-bottom: none; }

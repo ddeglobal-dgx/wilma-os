@@ -22,6 +22,7 @@ function buildDefaultState() {
     budgetCats: [],   // [{ id, name, emoji, pos, active }]
     budgets: {},      // { '2026-08': { <catId>: amountCents } }
     expenses: [],     // [{ id, cat_id, amount (Cent), note, day 'YYYY-MM-DD' }]
+    todos: [],        // [{ id, title, pos, created_at, done_at (ISO|null) }]
   };
 }
 
@@ -29,6 +30,7 @@ function migrateState(state) {
   if (!state.budgetCats) state.budgetCats = [];
   if (!state.budgets) state.budgets = {};
   if (!state.expenses) state.expenses = [];
+  if (!state.todos) state.todos = [];
   return state;
 }
 
@@ -113,6 +115,18 @@ class LocalStore {
   async deleteExpense(id) {
     this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._save();
   }
+
+  async addTodo(title) {
+    const row = { id: newId(), title, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null };
+    this.state.todos.push(row); this._save();
+    return row;
+  }
+  async updateTodo(id, patch) {
+    Object.assign(this.state.todos.find(t => t.id === id) || {}, patch); this._save();
+  }
+  async deleteTodo(id) {
+    this.state.todos = this.state.todos.filter(t => t.id !== id); this._save();
+  }
 }
 
 /* ---------- Cloud-Speicher (Supabase) ---------- */
@@ -137,7 +151,7 @@ class CloudStore {
   }
 
   async _loadAll() {
-    const [tasks, routines, rules, checks, settings, cats, budgets, expenses] = await Promise.all([
+    const [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos] = await Promise.all([
       this.sb.from('tasks').select('*').order('pos'),
       this.sb.from('routine_items').select('*').order('pos'),
       this.sb.from('rules').select('*').order('pos'),
@@ -146,8 +160,9 @@ class CloudStore {
       this.sb.from('budget_categories').select('*').order('pos'),
       this.sb.from('budgets').select('*'),
       this.sb.from('expenses').select('*').order('day'),
+      this.sb.from('todos').select('*').order('pos'),
     ]);
-    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses]) if (r.error) throw r.error;
+    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos]) if (r.error) throw r.error;
 
     const checkMap = {};
     for (const c of checks.data) {
@@ -165,6 +180,7 @@ class CloudStore {
       tasks: tasks.data, routines: routines.data, rules: rules.data,
       checks: checkMap, settings: settingsMap,
       budgetCats: cats.data, budgets: budgetMap, expenses: expenses.data,
+      todos: todos.data,
     };
   }
 
@@ -191,6 +207,7 @@ class CloudStore {
     }
     if (budgetRows.length) await this.sb.from('budgets').upsert(budgetRows);
     if (d.expenses.length) await this.sb.from('expenses').insert(d.expenses);
+    if (d.todos.length) await this.sb.from('todos').insert(d.todos);
   }
 
   _subscribe() {
@@ -300,5 +317,20 @@ class CloudStore {
   async deleteExpense(id) {
     this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._cache();
     await this.sb.from('expenses').delete().eq('id', id);
+  }
+
+  async addTodo(title) {
+    const row = { id: newId(), title, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null };
+    this.state.todos.push(row); this._cache();
+    await this.sb.from('todos').insert(row);
+    return row;
+  }
+  async updateTodo(id, patch) {
+    Object.assign(this.state.todos.find(t => t.id === id) || {}, patch); this._cache();
+    await this.sb.from('todos').update(patch).eq('id', id);
+  }
+  async deleteTodo(id) {
+    this.state.todos = this.state.todos.filter(t => t.id !== id); this._cache();
+    await this.sb.from('todos').delete().eq('id', id);
   }
 }

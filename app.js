@@ -1,6 +1,6 @@
 /* ============ Betriebssystem Laura — App-Logik ============ */
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 let store = null;
 let currentTab = 'heute';
@@ -170,6 +170,21 @@ function renderHeute() {
       <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft')}</div>
     </div>`;
 
+  const openTodos = store.state.todos
+    .filter(t => !t.done_at || t.done_at.slice(0, 10) === day)
+    .sort((a, b) => (!!a.done_at - !!b.done_at) || (a.pos - b.pos));
+  const todosHTML = `
+    <div class="card">
+      <h2 class="section-title">To-dos</h2>
+      ${openTodos.length ? openTodos.map(t => `
+        <div class="check-item ${t.done_at ? 'done' : ''}" data-todo="${t.id}">
+          <div class="check-box">✓</div>
+          <div class="check-label">${esc(t.title)}</div>
+          <button class="btn small subtle todo-edit" data-edit-todo="${t.id}">✎</button>
+        </div>`).join('') : '<p class="empty-note">Gerade nichts Einmaliges offen – schön! ♡</p>'}
+      <div style="margin-top:10px"><button class="btn small" id="add-todo">+ To-do</button></div>
+    </div>`;
+
   const banner = complete ? `
     <div class="card celebrate-banner">
       <span class="script big">${CELEBRATE_MESSAGES[dayOfYear(now) % CELEBRATE_MESSAGES.length]}</span>
@@ -189,6 +204,7 @@ function renderHeute() {
     ${banner}
     ${sections}
     ${tasksHTML}
+    ${todosHTML}
     ${zoneHTML}`;
 }
 
@@ -494,6 +510,232 @@ function expenseModal(prefillCatId) {
   };
 }
 
+/* ---------- To-dos ---------- */
+async function toggleTodo(id) {
+  const t = store.state.todos.find(t => t.id === id);
+  if (!t) return;
+  await store.updateTodo(id, { done_at: t.done_at ? null : new Date().toISOString() });
+  render();
+}
+
+function todoModal(todo) {
+  const isNew = !todo;
+  openModal(`
+    <h3>${isNew ? 'Neues To-do' : 'To-do bearbeiten'}</h3>
+    <label>Was steht an?</label>
+    <input type="text" id="m-title" value="${todo ? esc(todo.title) : ''}" placeholder="z. B. Geschenk für Mama besorgen">
+    <div class="modal-actions">
+      ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Speichern ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const title = document.getElementById('m-title').value.trim();
+    if (!title) return;
+    if (isNew) await store.addTodo(title); else await store.updateTodo(todo.id, { title });
+    closeModal(); render();
+  };
+  if (!isNew) document.getElementById('m-delete').onclick = async () => {
+    await store.deleteTodo(todo.id); closeModal(); render();
+  };
+}
+
+/* ---------- Verlauf (Historie & Trends) ---------- */
+let verlaufMode = 'woche';
+
+function isoWeekNum(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+function verlaufPeriods(mode, n) {
+  const periods = [];
+  const today = new Date();
+  if (mode === 'woche') {
+    const thisMon = mondayOf(today);
+    for (let i = n - 1; i >= 0; i--) {
+      const start = new Date(thisMon.getFullYear(), thisMon.getMonth(), thisMon.getDate() - 7 * i);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      periods.push({ start, end, label: 'KW ' + isoWeekNum(start) });
+    }
+  } else {
+    for (let i = n - 1; i >= 0; i--) {
+      const start = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+      periods.push({ start, end, label: start.toLocaleDateString('de-DE', { month: 'short' }) });
+    }
+  }
+  return periods;
+}
+
+function firstCheckDay() {
+  const days = Object.keys(store.state.checks).filter(d => Object.keys(store.state.checks[d]).length);
+  return days.length ? days.sort()[0] : null;
+}
+
+function dayExpected(date) {
+  return store.state.routines.filter(r => r.active).length
+    + tasksForDate(date).filter(t => isBiweeklyDue(t, date)).length
+    + 1; // 15-Minuten-Zone
+}
+
+// Anteil erledigter Punkte in einem Zeitraum (nur Tage seit dem ersten Häkchen, nicht in der Zukunft)
+function periodStats(start, end) {
+  const first = firstCheckDay();
+  if (!first) return { pct: null, done: 0, expected: 0 };
+  const today = todayISO();
+  let done = 0, expected = 0;
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = toISO(d);
+    if (iso < first || iso > today) continue;
+    const exp = dayExpected(d);
+    const got = store.state.checks[iso] ? Object.keys(store.state.checks[iso]).length : 0;
+    expected += exp;
+    done += Math.min(got, exp);
+  }
+  return { pct: expected ? Math.round(done / expected * 100) : null, done, expected };
+}
+
+// Anzahl Häkchen je Punkt in einem Zeitraum (+ mögliche Tage)
+function itemPeriodCounts(start, end) {
+  const today = todayISO();
+  const counts = {};
+  let daysCounted = 0;
+  const taskPossible = {};
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const iso = toISO(d);
+    if (iso > today) continue;
+    daysCounted++;
+    for (const t of tasksForDate(d)) {
+      if (isBiweeklyDue(t, d)) taskPossible[t.id] = (taskPossible[t.id] || 0) + 1;
+    }
+    const dayChecks = store.state.checks[iso] || {};
+    for (const key of Object.keys(dayChecks)) counts[key] = (counts[key] || 0) + 1;
+  }
+  return { counts, days: daysCounted, taskPossible };
+}
+
+function trendArrow(cur, prev) {
+  if (cur > prev) return '<span class="trend up">▲</span>';
+  if (cur < prev) return '<span class="trend down">▼</span>';
+  return '<span class="trend flat">●</span>';
+}
+
+function renderVerlauf() {
+  const isWeek = verlaufMode === 'woche';
+  const n = isWeek ? 8 : 6;
+  const periods = verlaufPeriods(verlaufMode, n);
+  const first = firstCheckDay();
+
+  const toggle = `
+    <div class="seg-toggle">
+      <button class="seg ${isWeek ? 'active' : ''}" data-mode="woche">Wochen</button>
+      <button class="seg ${isWeek ? '' : 'active'}" data-mode="monat">Monate</button>
+    </div>`;
+
+  if (!first) {
+    return toggle + `<div class="card" style="text-align:center">
+      <p class="empty-note">Sobald du die ersten Häkchen setzt, wächst hier dein Verlauf. ♡</p></div>`;
+  }
+
+  // Balken-Chart
+  const stats = periods.map(p => ({ ...p, ...periodStats(p.start, p.end) }));
+  const visible = stats.filter(s => s.pct !== null);
+  const bars = visible.map((s, i) => `
+    <div class="vbar-wrap ${i === visible.length - 1 ? 'current' : ''}">
+      <div class="vbar-pct">${s.pct}%</div>
+      <div class="vbar-track"><div class="vbar" style="height:${Math.max(3, s.pct)}%"></div></div>
+      <div class="vbar-label">${esc(s.label)}</div>
+    </div>`).join('');
+
+  let trendText = '';
+  if (visible.length >= 2) {
+    const cur = visible[visible.length - 1], prev = visible[visible.length - 2];
+    const diff = cur.pct - prev.pct;
+    const word = isWeek ? ['Diese Woche', 'Vorwoche'] : ['Dieser Monat', 'Vormonat'];
+    trendText = `<p class="trend-line">${word[0]}: <b>${cur.pct} %</b> · ${word[1]}: ${prev.pct} %
+      ${diff > 0 ? `<span class="trend up">▲ +${diff}</span> – schöne Entwicklung!`
+        : diff < 0 ? `<span class="trend down">▼ ${diff}</span> – alles okay, jeder Tag zählt neu. ♡`
+        : '<span class="trend flat">●</span> – schön stabil.'}</p>`;
+  }
+
+  const chartCard = `
+    <div class="card">
+      <h2 class="section-title">Regelmäßiges</h2>
+      <div class="vchart">${bars}</div>
+      ${trendText}
+    </div>`;
+
+  // Einzelauswertung: aktueller vs. vorheriger Zeitraum
+  const curP = periods[periods.length - 1];
+  const prevP = periods[periods.length - 2];
+  const curC = itemPeriodCounts(curP.start, curP.end);
+  const prevC = prevP ? itemPeriodCounts(prevP.start, prevP.end) : { counts: {}, days: 0, taskPossible: {} };
+
+  const rows = [];
+  const groups = routinesBySection();
+  for (const sec of Object.keys(SECTION_META).sort((a, b) => SECTION_META[a].order - SECTION_META[b].order)) {
+    for (const r of (groups[sec] || [])) {
+      const key = 'routine:' + r.id;
+      rows.push({ label: r.title, cur: curC.counts[key] || 0, possible: curC.days, prev: prevC.counts[key] || 0 });
+    }
+  }
+  for (const t of store.state.tasks.filter(t => t.active).sort((a, b) => a.weekday - b.weekday || a.pos - b.pos)) {
+    const key = 'task:' + t.id;
+    rows.push({ label: t.title, cur: curC.counts[key] || 0, possible: curC.taskPossible[t.id] || 0, prev: prevC.counts[key] || 0 });
+  }
+  rows.push({ label: '15-Minuten-Zone ♡', cur: curC.counts['zone'] || 0, possible: curC.days, prev: prevC.counts['zone'] || 0 });
+
+  const itemsCard = `
+    <div class="card">
+      <h2 class="section-title">${isWeek ? 'Diese Woche' : 'Dieser Monat'} im Detail</h2>
+      ${rows.map(r => `
+        <div class="hist-row">
+          <span class="grow">${esc(r.label)}</span>
+          <span class="hist-count">${r.cur}${r.possible ? ' / ' + r.possible : ''}</span>
+          ${trendArrow(r.cur, r.prev)}
+        </div>`).join('')}
+      <p class="settings-sub" style="margin-top:8px">Pfeile vergleichen mit ${isWeek ? 'der Vorwoche' : 'dem Vormonat'}.</p>
+    </div>`;
+
+  // Erledigte To-dos, gruppiert nach Zeitraum
+  const doneTodos = store.state.todos
+    .filter(t => t.done_at)
+    .sort((a, b) => b.done_at.localeCompare(a.done_at));
+  const groupsMap = new Map();
+  for (const t of doneTodos) {
+    const d = parseISO(t.done_at.slice(0, 10));
+    const key = isWeek
+      ? d.getFullYear() + '-KW' + String(isoWeekNum(d)).padStart(2, '0')
+      : t.done_at.slice(0, 7);
+    const label = isWeek
+      ? 'KW ' + isoWeekNum(d)
+      : d.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' });
+    if (!groupsMap.has(key)) groupsMap.set(key, { label, items: [] });
+    groupsMap.get(key).items.push(t);
+  }
+  const todoGroups = [...groupsMap.values()].slice(0, n);
+  const todosCard = `
+    <div class="card">
+      <h2 class="section-title">Erledigte To-dos</h2>
+      ${todoGroups.length ? todoGroups.map(g => `
+        <div class="hist-group">
+          <div class="hist-group-title">${esc(g.label)} <span class="badge">${g.items.length}</span></div>
+          ${g.items.map(t => `
+            <div class="hist-row">
+              <span class="exp-day">${t.done_at.slice(8, 10)}.${t.done_at.slice(5, 7)}.</span>
+              <span class="grow done-title">${esc(t.title)}</span>
+            </div>`).join('')}
+        </div>`).join('') : '<p class="empty-note">Noch keine erledigten To-dos – die Liste füllt sich von selbst. ♡</p>'}
+    </div>`;
+
+  return toggle + chartCard + itemsCard + todosCard;
+}
+
 /* ---------- Modals ---------- */
 function openModal(html) {
   const wrap = document.getElementById('modal-wrap');
@@ -668,6 +910,7 @@ function render() {
   if (currentTab === 'heute') view.innerHTML = renderHeute();
   else if (currentTab === 'woche') view.innerHTML = renderWoche();
   else if (currentTab === 'budget') view.innerHTML = renderBudget();
+  else if (currentTab === 'verlauf') view.innerHTML = renderVerlauf();
   else if (currentTab === 'regeln') view.innerHTML = renderRegeln();
   else view.innerHTML = renderEinstellungen();
 
@@ -675,6 +918,7 @@ function render() {
   document.getElementById('top-sub').textContent =
     currentTab === 'woche' ? 'Wochenplan Haushalt' :
     currentTab === 'budget' ? 'Dein Geld im Blick' :
+    currentTab === 'verlauf' ? 'Dein Weg, sichtbar gemacht' :
     currentTab === 'regeln' ? 'Meine Regeln & Projektzeit' :
     currentTab === 'einstellungen' ? 'Alles nach deinem Geschmack' :
     'Dein Tag · ' + now.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
@@ -706,6 +950,25 @@ function render() {
   });
   const pz = document.getElementById('edit-projektzeit');
   if (pz) pz.onclick = projektzeitModal;
+
+  // To-do-Events
+  view.querySelectorAll('.check-item[data-todo]').forEach(el => {
+    el.onclick = (ev) => {
+      if (ev.target.closest('[data-edit-todo]')) return;
+      toggleTodo(el.dataset.todo);
+    };
+  });
+  view.querySelectorAll('[data-edit-todo]').forEach(b => b.onclick = (ev) => {
+    ev.stopPropagation();
+    todoModal(store.state.todos.find(t => t.id === b.dataset.editTodo));
+  });
+  const addTodo = document.getElementById('add-todo');
+  if (addTodo) addTodo.onclick = () => todoModal(null);
+
+  // Verlauf-Events
+  view.querySelectorAll('.seg[data-mode]').forEach(b => b.onclick = () => {
+    verlaufMode = b.dataset.mode; render();
+  });
 
   // Budget-Events
   const bmPrev = document.getElementById('bm-prev');
@@ -751,8 +1014,9 @@ async function bootWithStore(s) {
 }
 
 async function boot() {
+  const forceLocal = new URLSearchParams(location.search).has('local');
   const cloudConfigured = typeof SUPABASE_URL === 'string' && SUPABASE_URL && SUPABASE_ANON_KEY;
-  if (!cloudConfigured) {
+  if (!cloudConfigured || forceLocal) {
     await bootWithStore(new LocalStore());
     return;
   }
