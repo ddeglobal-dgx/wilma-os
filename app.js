@@ -1,6 +1,6 @@
 /* ============ Betriebssystem Laura — App-Logik ============ */
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 let store = null;
 let currentTab = 'heute';
@@ -170,21 +170,6 @@ function renderHeute() {
       <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft')}</div>
     </div>`;
 
-  const openTodos = store.state.todos
-    .filter(t => !t.done_at || t.done_at.slice(0, 10) === day)
-    .sort((a, b) => (!!a.done_at - !!b.done_at) || (a.pos - b.pos));
-  const todosHTML = `
-    <div class="card">
-      <h2 class="section-title">To-dos</h2>
-      ${openTodos.length ? openTodos.map(t => `
-        <div class="check-item ${t.done_at ? 'done' : ''}" data-todo="${t.id}">
-          <div class="check-box">✓</div>
-          <div class="check-label">${esc(t.title)}</div>
-          <button class="btn small subtle todo-edit" data-edit-todo="${t.id}">✎</button>
-        </div>`).join('') : '<p class="empty-note">Gerade nichts Einmaliges offen – schön! ♡</p>'}
-      <div style="margin-top:10px"><button class="btn small" id="add-todo">+ To-do</button></div>
-    </div>`;
-
   const banner = complete ? `
     <div class="card celebrate-banner">
       <span class="script big">${CELEBRATE_MESSAGES[dayOfYear(now) % CELEBRATE_MESSAGES.length]}</span>
@@ -204,8 +189,41 @@ function renderHeute() {
     ${banner}
     ${sections}
     ${tasksHTML}
-    ${todosHTML}
     ${zoneHTML}`;
+}
+
+/* ---------- Ansicht: To-dos ---------- */
+function renderTodos() {
+  const day = todayISO();
+  const open = store.state.todos.filter(t => !t.done_at).sort((a, b) => a.pos - b.pos);
+  const doneToday = store.state.todos
+    .filter(t => t.done_at && t.done_at.slice(0, 10) === day)
+    .sort((a, b) => b.done_at.localeCompare(a.done_at));
+
+  const openCard = `
+    <div class="card">
+      <h2 class="section-title">Offen ${open.length ? `<span class="badge">${open.length}</span>` : ''}</h2>
+      ${open.length ? open.map(t => `
+        <div class="check-item" data-todo="${t.id}">
+          <div class="check-box">✓</div>
+          <div class="check-label">${esc(t.title)}</div>
+          <button class="btn small subtle todo-edit" data-edit-todo="${t.id}">✎</button>
+        </div>`).join('') : '<p class="empty-note">Gerade nichts Einmaliges offen – wie schön! ♡</p>'}
+      <div style="margin-top:10px"><button class="btn primary small" id="add-todo">+ To-do</button></div>
+    </div>`;
+
+  const doneCard = doneToday.length ? `
+    <div class="card">
+      <h2 class="section-title">Heute erledigt</h2>
+      ${doneToday.map(t => `
+        <div class="check-item done" data-todo="${t.id}">
+          <div class="check-box">✓</div>
+          <div class="check-label">${esc(t.title)}</div>
+        </div>`).join('')}
+    </div>` : '';
+
+  return openCard + doneCard + `
+    <p class="empty-note" style="text-align:center">Alles früher Erledigte findest du im Verlauf ↺</p>`;
 }
 
 /* ---------- Ansicht: Woche ---------- */
@@ -909,6 +927,7 @@ function render() {
   const view = document.getElementById('view');
   if (currentTab === 'heute') view.innerHTML = renderHeute();
   else if (currentTab === 'woche') view.innerHTML = renderWoche();
+  else if (currentTab === 'todos') view.innerHTML = renderTodos();
   else if (currentTab === 'budget') view.innerHTML = renderBudget();
   else if (currentTab === 'verlauf') view.innerHTML = renderVerlauf();
   else if (currentTab === 'regeln') view.innerHTML = renderRegeln();
@@ -917,6 +936,7 @@ function render() {
   const now = new Date();
   document.getElementById('top-sub').textContent =
     currentTab === 'woche' ? 'Wochenplan Haushalt' :
+    currentTab === 'todos' ? 'Einmal erledigen, für immer abgehakt' :
     currentTab === 'budget' ? 'Dein Geld im Blick' :
     currentTab === 'verlauf' ? 'Dein Weg, sichtbar gemacht' :
     currentTab === 'regeln' ? 'Meine Regeln & Projektzeit' :
