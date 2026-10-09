@@ -1,3 +1,9 @@
+# Wilma App (früher „Betriebssystem Laura")
+
+> Ab v2.0.0 (09.10.2026, Ticket E-66): gemeinsamer Raum von Dennis und Laura fürs Haus. Anmeldung ohne Passwort per Code aus der Mail. Datenbank-Umbau: `supabase/2026-10-09_wilma_2_0.sql`. Testmodus ohne Cloud: `?local=1` (im Reiter „Anpassen“ zwischen Dennis und Laura wechseln).
+
+---
+
 # Betriebssystem Laura ♡ — Anleitung für Dennis
 
 Die App läuft in **zwei Modi**:

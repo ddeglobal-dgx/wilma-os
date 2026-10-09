@@ -1,7 +1,7 @@
 {
-  "name": "Betriebssystem Laura",
-  "short_name": "Laura ♡",
-  "description": "Dein liebevoller Tagesbegleiter – Wochenplan, Routinen & Time to Grow.",
+  "name": "Wilma – unser Haus",
+  "short_name": "Wilma",
+  "description": "Unser gemeinsamer Raum fürs Haus: Hausregeln, Routinen, Wochenplan, To-dos.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

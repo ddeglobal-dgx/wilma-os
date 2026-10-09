@@ -1,4 +1,22 @@
-/* ============ Standard-Daten: Lauras Wochenplan, Routinen, Regeln, Sprüche ============ */
+/* ============ Wilma App — Standard-Daten: Personen, Wochenplan, Routinen, Regeln, Sprüche ============ */
+
+// Die zwei Bewohner. Wer gerade angemeldet ist, steht in `me` (app.js).
+const PEOPLE = {
+  dennis: { name: 'Dennis', short: 'D' },
+  laura:  { name: 'Laura',  short: 'L' },
+};
+const PERSON_KEYS = ['dennis', 'laura'];
+
+// Wem gehört ein Punkt?
+//   haus      = allgemein: einer erledigt es, das reicht
+//   dennis / laura = persönlich: nur die Person selbst hakt ab
+//   gemeinsam = wird erst grün, wenn BEIDE bestätigt haben
+const OWNER_META = {
+  gemeinsam: { label: 'Gemeinsam', order: 0 },
+  haus:      { label: 'Haus',      order: 1 },
+  laura:     { label: 'Laura',     order: 2 },
+  dennis:    { label: 'Dennis',    order: 3 },
+};
 
 // Ankerwoche für alle 2-wöchentlichen Aufgaben (Montag). In "Anpassen" pro Aufgabe umschaltbar.
 const DEFAULT_ANCHOR = '2026-08-03';
@@ -42,6 +60,10 @@ const DEFAULT_TASKS = [
 ];
 
 const DEFAULT_ROUTINES = [
+  // Hausregeln mit Ampel — gemeinsam, grün erst wenn beide bestätigt haben
+  { section: 'ampel', owner: 'gemeinsam', title: 'OG in Ordnung', gate: 'bevor wir morgens Kaffee trinken', gate_slot: 'morgen' },
+  { section: 'ampel', owner: 'gemeinsam', title: 'EG in Ordnung', gate: 'bevor wir schlafen gehen', gate_slot: 'abend' },
+  // Lauras persönliche Routinen
   { section: 'morgen', title: 'Aufstehen & Bad' },
   { section: 'morgen', title: 'Betten kurz machen (OG)' },
   { section: 'morgen', title: '5-Minuten-Ordnung oben' },
@@ -55,9 +77,11 @@ const DEFAULT_ROUTINES = [
 ];
 
 const SECTION_META = {
+  ampel:  { label: 'Hausregel mit Ampel', order: 0 },
   morgen: { label: 'Morgenroutine', order: 1 },
   grow:   { label: 'Time to Grow', order: 2 },
   hunde:  { label: 'Hunde', order: 3 },
+  alltag: { label: 'Routinen', order: 4 },
 };
 
 const DEFAULT_RULES = [

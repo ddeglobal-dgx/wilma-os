@@ -1,6 +1,7 @@
-/* ============ Datenhaltung: lokal (localStorage) oder Cloud (Supabase) ============ */
+/* ============ Wilma App — Datenhaltung: lokal (localStorage) oder Cloud (Supabase) ============ */
 
-const LS_KEY = 'bsl-state-v1';
+const LS_KEY = 'wilma-state-v1';
+const LEGACY_LS_KEY = 'bsl-state-v1';   // Betriebssystem Laura (gleiche Adresse gibt es nicht, nur für lokale Tests)
 
 function newId() {
   return (crypto.randomUUID) ? crypto.randomUUID()
@@ -10,14 +11,15 @@ function newId() {
 function buildDefaultState() {
   return {
     tasks: DEFAULT_TASKS.map((t, i) => ({
-      id: newId(), title: t.title, weekday: t.weekday,
+      id: newId(), title: t.title, weekday: t.weekday, owner: 'haus',
       cadence: t.cadence, anchor: DEFAULT_ANCHOR, pos: i, active: true,
     })),
     routines: DEFAULT_ROUTINES.map((r, i) => ({
-      id: newId(), section: r.section, title: r.title, pos: i, active: true,
+      id: newId(), section: r.section, title: r.title, owner: r.owner || 'laura',
+      gate: r.gate || null, gate_slot: r.gate_slot || null, pos: i, active: true,
     })),
-    rules: DEFAULT_RULES.map((text, i) => ({ id: newId(), text, pos: i })),
-    checks: {},   // { '2026-08-07': { 'task:<id>': true, 'zone': true } }
+    rules: DEFAULT_RULES.map((text, i) => ({ id: newId(), text, owner: 'laura', pos: i })),
+    checks: {},   // { '2026-10-09': { 'task:<id>': { laura: true }, 'routine:<id>': { laura: true, dennis: true } } }
     settings: { projektzeit: DEFAULT_PROJEKTZEIT },
     budgetCats: [],   // [{ id, name, emoji, pos, active }]
     budgets: {},      // { '2026-08': { <catId>: amountCents } }
@@ -31,6 +33,22 @@ function migrateState(state) {
   if (!state.budgets) state.budgets = {};
   if (!state.expenses) state.expenses = [];
   if (!state.todos) state.todos = [];
+  // Alt-Daten aus „Betriebssystem Laura": alles gehörte Laura, Haushalt wird Haus
+  for (const t of state.tasks) if (!t.owner) t.owner = 'haus';
+  for (const r of state.routines) if (!r.owner) r.owner = 'laura';
+  for (const r of state.rules) if (!r.owner) r.owner = 'laura';
+  for (const t of state.todos) if (!t.owner) t.owner = 'laura';
+  if (!state.routines.some(r => r.section === 'ampel')) {
+    for (const r of DEFAULT_ROUTINES.filter(r => r.section === 'ampel')) {
+      state.routines.push({ id: newId(), pos: state.routines.length, active: true, ...r });
+    }
+  }
+  // Häkchen: früher { key: true } (= Laura), jetzt { key: { laura: true, dennis: true } }
+  for (const day of Object.keys(state.checks || {})) {
+    for (const key of Object.keys(state.checks[day])) {
+      if (state.checks[day][key] === true) state.checks[day][key] = { laura: true };
+    }
+  }
   return state;
 }
 
@@ -39,7 +57,7 @@ class LocalStore {
   constructor() { this.mode = 'local'; this.onChange = null; }
 
   async init() {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(LS_KEY) || localStorage.getItem(LEGACY_LS_KEY);
     this.state = migrateState(raw ? JSON.parse(raw) : buildDefaultState());
     this._save();
   }
@@ -67,19 +85,21 @@ class LocalStore {
     this.state.routines = this.state.routines.filter(r => r.id !== id); this._save();
   }
 
-  async addRule(text) {
-    this.state.rules.push({ id: newId(), text, pos: this.state.rules.length }); this._save();
+  async addRule(text, owner = 'haus') {
+    this.state.rules.push({ id: newId(), text, owner, pos: this.state.rules.length }); this._save();
   }
-  async updateRule(id, text) {
-    Object.assign(this.state.rules.find(r => r.id === id) || {}, { text }); this._save();
+  async updateRule(id, patch) {
+    Object.assign(this.state.rules.find(r => r.id === id) || {}, patch); this._save();
   }
   async deleteRule(id) {
     this.state.rules = this.state.rules.filter(r => r.id !== id); this._save();
   }
 
-  async setCheck(day, key, on) {
+  async setCheck(day, key, who, on) {
     const d = this.state.checks[day] || (this.state.checks[day] = {});
-    if (on) d[key] = true; else delete d[key];
+    const c = d[key] || (d[key] = {});
+    if (on) c[who] = true; else delete c[who];
+    if (!Object.keys(c).length) delete d[key];
     this._save();
   }
 
@@ -116,8 +136,8 @@ class LocalStore {
     this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._save();
   }
 
-  async addTodo(title) {
-    const row = { id: newId(), title, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null };
+  async addTodo(title, owner) {
+    const row = { id: newId(), title, owner, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null };
     this.state.todos.push(row); this._save();
     return row;
   }
@@ -166,7 +186,8 @@ class CloudStore {
 
     const checkMap = {};
     for (const c of checks.data) {
-      (checkMap[c.day] = checkMap[c.day] || {})[c.item_key] = true;
+      const d = (checkMap[c.day] = checkMap[c.day] || {});
+      (d[c.item_key] = d[c.item_key] || {})[c.user_key || 'laura'] = true;
     }
     const settingsMap = { projektzeit: DEFAULT_PROJEKTZEIT };
     for (const s of settings.data) settingsMap[s.key] = s.value?.v ?? s.value;
@@ -196,7 +217,9 @@ class CloudStore {
 
     const checkRows = [];
     for (const day of Object.keys(d.checks)) {
-      for (const item_key of Object.keys(d.checks[day])) checkRows.push({ day, item_key });
+      for (const item_key of Object.keys(d.checks[day])) {
+        for (const user_key of Object.keys(d.checks[day][item_key])) checkRows.push({ day, item_key, user_key });
+      }
     }
     if (checkRows.length) await this.sb.from('checks').upsert(checkRows);
 
@@ -211,7 +234,7 @@ class CloudStore {
   }
 
   _subscribe() {
-    this.sb.channel('bsl-sync')
+    this.sb.channel('wilma-sync')
       .on('postgres_changes', { event: '*', schema: 'public' }, async () => {
         try {
           await this._loadAll();
@@ -223,6 +246,15 @@ class CloudStore {
   }
 
   _cache() { localStorage.setItem(LS_KEY + '-cloudcache', JSON.stringify(this.state)); }
+
+  // Wer ist angemeldet? E-Mail der Sitzung → 'dennis' | 'laura' (Tabelle members)
+  async whoAmI() {
+    const { data: { user } } = await this.sb.auth.getUser();
+    if (!user) return null;
+    const { data, error } = await this.sb.from('members').select('person').eq('email', (user.email || '').toLowerCase()).maybeSingle();
+    if (error || !data) return null;
+    return data.person;
+  }
 
   async addTask(t) {
     const row = { id: newId(), anchor: DEFAULT_ANCHOR, pos: this.state.tasks.length, active: true, ...t };
@@ -252,26 +284,28 @@ class CloudStore {
     await this.sb.from('routine_items').delete().eq('id', id);
   }
 
-  async addRule(text) {
-    const row = { id: newId(), text, pos: this.state.rules.length };
+  async addRule(text, owner = 'haus') {
+    const row = { id: newId(), text, owner, pos: this.state.rules.length };
     this.state.rules.push(row); this._cache();
     await this.sb.from('rules').insert(row);
   }
-  async updateRule(id, text) {
-    Object.assign(this.state.rules.find(r => r.id === id) || {}, { text }); this._cache();
-    await this.sb.from('rules').update({ text }).eq('id', id);
+  async updateRule(id, patch) {
+    Object.assign(this.state.rules.find(r => r.id === id) || {}, patch); this._cache();
+    await this.sb.from('rules').update(patch).eq('id', id);
   }
   async deleteRule(id) {
     this.state.rules = this.state.rules.filter(r => r.id !== id); this._cache();
     await this.sb.from('rules').delete().eq('id', id);
   }
 
-  async setCheck(day, key, on) {
+  async setCheck(day, key, who, on) {
     const d = this.state.checks[day] || (this.state.checks[day] = {});
-    if (on) d[key] = true; else delete d[key];
+    const c = d[key] || (d[key] = {});
+    if (on) c[who] = true; else delete c[who];
+    if (!Object.keys(c).length) delete d[key];
     this._cache();
-    if (on) await this.sb.from('checks').upsert({ day, item_key: key });
-    else await this.sb.from('checks').delete().eq('day', day).eq('item_key', key);
+    if (on) await this.sb.from('checks').upsert({ day, item_key: key, user_key: who });
+    else await this.sb.from('checks').delete().eq('day', day).eq('item_key', key).eq('user_key', who);
   }
 
   async setSetting(key, value) {
@@ -319,8 +353,8 @@ class CloudStore {
     await this.sb.from('expenses').delete().eq('id', id);
   }
 
-  async addTodo(title) {
-    const row = { id: newId(), title, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null };
+  async addTodo(title, owner) {
+    const row = { id: newId(), title, owner, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null };
     this.state.todos.push(row); this._cache();
     await this.sb.from('todos').insert(row);
     return row;

@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Betriebssystem Laura ♡</title>
-  <meta name="description" content="Dein liebevoller Tagesbegleiter – Wochenplan, Routinen &amp; Time to Grow.">
+  <title>Wilma ♡</title>
+  <meta name="description" content="Wilma – unser gemeinsamer Raum fürs Haus: Hausregeln, Routinen, Wochenplan, To-dos.">
   <meta name="theme-color" content="#faf4ec">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Laura ♡">
+  <meta name="apple-mobile-web-app-title" content="Wilma">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -22,11 +22,15 @@
   <!-- Login (nur im Cloud-Modus sichtbar) -->
   <div id="login" class="login hidden">
     <div class="login-card">
-      <h1 class="brand">Betriebssystem <span class="script">Laura</span> <span class="heart">♡</span></h1>
-      <p class="login-sub">Schön, dass du da bist.</p>
-      <input id="login-email" type="email" placeholder="E-Mail" autocomplete="username">
-      <input id="login-pass" type="password" placeholder="Passwort" autocomplete="current-password">
-      <button id="login-btn" class="btn primary">Anmelden ♡</button>
+      <h1 class="brand">Haus <span class="script">Wilma</span> <span class="heart">♡</span></h1>
+      <p class="login-sub">Schön, dass du da bist. Einmal anmelden – danach kennt dich dieses Gerät.</p>
+      <input id="login-email" type="email" placeholder="Deine E-Mail-Adresse" autocomplete="email" inputmode="email">
+      <button id="login-send" class="btn primary">Code schicken ♡</button>
+      <p id="login-info" class="login-sub"></p>
+      <div id="login-code-row" class="login-code-row hidden">
+        <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="Code aus der Mail">
+        <button id="login-verify" class="btn primary">Anmelden ♡</button>
+      </div>
       <p id="login-error" class="login-error"></p>
     </div>
   </div>
@@ -34,13 +38,13 @@
   <!-- App -->
   <div id="app" class="app hidden">
     <header class="topbar">
-      <h1 class="brand">Betriebssystem <span class="script">Laura</span> <span class="heart">♡</span></h1>
+      <h1 class="brand">Haus <span class="script">Wilma</span> <span class="heart">♡</span></h1>
       <p id="top-sub" class="top-sub"></p>
     </header>
 
     <main id="view" class="view"></main>
 
-    <footer class="motto"><span class="heart">♡</span> <span class="script big">Du machst das großartig!</span></footer>
+    <footer class="motto"><span class="heart">♡</span> <span class="script big">Wir machen das großartig!</span></footer>
 
     <nav class="tabbar">
       <button data-tab="heute" class="tab active"><span class="tab-ico">☀</span>Heute</button>

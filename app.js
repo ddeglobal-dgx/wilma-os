@@ -1,8 +1,10 @@
-/* ============ Betriebssystem Laura — App-Logik ============ */
+/* ============ Wilma App — App-Logik (früher „Betriebssystem Laura") ============ */
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '2.0.0';
 
 let store = null;
+let me = null;            // wer dieses Gerät benutzt: 'dennis' | 'laura'
+let viewPerson = null;    // wessen Tag gerade angezeigt wird (Umschalter)
 let currentTab = 'heute';
 let dayWasComplete = false;
 let timerInterval = null;
@@ -41,43 +43,101 @@ function formatDateLong(d) {
   return d.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-/* ---------- Checks ---------- */
-function isChecked(day, key) { return !!(store.state.checks[day] && store.state.checks[day][key]); }
-async function toggleCheck(day, key) {
-  const on = !isChecked(day, key);
-  await store.setCheck(day, key, on);
+/* ---------- Personen ---------- */
+function partnerOf(p) { return p === 'dennis' ? 'laura' : 'dennis'; }
+function nameOf(p) { return PEOPLE[p]?.name || p; }
+function genitiv(p) { const n = nameOf(p); return /[sxz]$/i.test(n) ? n + "'" : n + 's'; }
+
+/* ---------- Checks ----------
+   checks[day][key] = { dennis: true, laura: true } — wer hat abgehakt.
+   Erledigt heißt je nach Besitz:
+     haus      → einer reicht
+     gemeinsam → beide
+     dennis/laura → nur diese Person zählt                                    */
+function checkers(day, key) { return (store.state.checks[day] && store.state.checks[day][key]) || {}; }
+function hasChecked(day, key, who) { return !!checkers(day, key)[who]; }
+function isDoneFor(day, key, owner) {
+  const c = checkers(day, key);
+  if (owner === 'gemeinsam') return PERSON_KEYS.every(p => c[p]);
+  if (owner === 'haus') return Object.keys(c).length > 0;
+  return !!c[owner];
+}
+// Fortschritt einer Person: bei Gemeinsamem zählt ihre eigene Bestätigung
+function doneForPerson(day, key, owner, person) {
+  if (owner === 'gemeinsam') return hasChecked(day, key, person);
+  return isDoneFor(day, key, owner);
+}
+function canToggle(owner) { return owner === 'haus' || owner === 'gemeinsam' || owner === me; }
+
+function showToast(text) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+async function toggleCheck(day, key, owner) {
+  if (!canToggle(owner)) { showToast(`Das hakt ${nameOf(owner)} selbst ab ♡`); return; }
+  const c = checkers(day, key);
+  if (owner === 'haus' && !c[me] && Object.keys(c).length) {
+    showToast(`Hat ${Object.keys(c).map(nameOf).join(' & ')} schon erledigt ♡`); return;
+  }
+  const wasDone = isDoneFor(day, key, owner);
+  const on = !c[me];
+  await store.setCheck(day, key, me, on);
   // Zone abgehakt → Timer ist damit erledigt und stoppt
   if (key === 'zone' && on && day === todayISO()) {
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
     timerPaused = false; timerSecondsLeft = 15 * 60;
   }
   render();
+  if (owner === 'gemeinsam' && on && !wasDone && isDoneFor(day, key, owner)) {
+    rainHearts(40);
+    showToast('Beide bestätigt – grün! ♡');
+  } else if (owner === 'gemeinsam' && on) {
+    showToast(`Bestätigt – jetzt fehlt noch ${nameOf(partnerOf(me))}.`);
+  }
   if (on) maybeCelebrate();
 }
 
 /* ---------- Tages-Items ---------- */
-function tasksForDate(date) {
+function tasksForDate(date, person) {
   const wd = isoWeekday(date);
   return store.state.tasks
-    .filter(t => t.active && t.weekday === wd)
+    .filter(t => t.active && t.weekday === wd && (!person || t.owner === 'haus' || t.owner === 'gemeinsam' || t.owner === person))
     .sort((a, b) => a.pos - b.pos);
 }
-function routinesBySection() {
+function routinesBySection(owner) {
   const groups = {};
-  for (const r of store.state.routines.filter(r => r.active).sort((a, b) => a.pos - b.pos)) {
+  for (const r of store.state.routines.filter(r => r.active && (!owner || r.owner === owner)).sort((a, b) => a.pos - b.pos)) {
     (groups[r.section] = groups[r.section] || []).push(r);
   }
   return groups;
 }
-function todayProgress() {
+// Ampeln: vormittags steht die Morgen-Ampel oben, ab 14 Uhr die Abend-Ampel
+function ampelRoutines() {
+  const first = new Date().getHours() < 14 ? 'morgen' : 'abend';
+  return store.state.routines.filter(r => r.active && r.section === 'ampel')
+    .sort((a, b) => (a.gate_slot === first ? 0 : 1) - (b.gate_slot === first ? 0 : 1) || a.pos - b.pos);
+}
+// Alle Punkte, die an einem Tag für eine Person zählen: [{ key, owner }]
+function dayItems(date, person) {
+  const items = [];
+  for (const r of store.state.routines.filter(r => r.active && (r.owner === person || r.owner === 'gemeinsam'))) {
+    items.push({ key: 'routine:' + r.id, owner: r.owner });
+  }
+  for (const t of tasksForDate(date, person)) if (isBiweeklyDue(t, date)) items.push({ key: 'task:' + t.id, owner: t.owner });
+  items.push({ key: 'zone', owner: person });
+  return items;
+}
+function todayProgress(person = me) {
   const date = new Date();
   const day = todayISO();
-  const keys = [];
-  for (const r of store.state.routines.filter(r => r.active)) keys.push('routine:' + r.id);
-  for (const t of tasksForDate(date)) if (isBiweeklyDue(t, date)) keys.push('task:' + t.id);
-  keys.push('zone');
-  const done = keys.filter(k => isChecked(day, k)).length;
-  return { done, total: keys.length };
+  const items = dayItems(date, person);
+  const done = items.filter(i => doneForPerson(day, i.key, i.owner, person)).length;
+  return { done, total: items.length };
 }
 
 /* ---------- Feier ---------- */
@@ -105,43 +165,104 @@ function rainHearts(n) {
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function checkItemHTML(day, key, label, note) {
-  const done = isChecked(day, key);
-  return `<div class="check-item ${done ? 'done' : ''}" role="button" tabindex="0" aria-pressed="${done}" data-day="${day}" data-key="${esc(key)}">
+function whoChips(day, key) {
+  const c = checkers(day, key);
+  return PERSON_KEYS.filter(p => c[p]).map(p => `<span class="who who-${p}" title="${nameOf(p)}">${PEOPLE[p].short}</span>`).join('');
+}
+function checkItemHTML(day, key, label, note, owner = 'haus') {
+  const done = isDoneFor(day, key, owner);
+  const partial = owner === 'gemeinsam' && !done && Object.keys(checkers(day, key)).length > 0;
+  const readonly = !canToggle(owner);
+  const chips = (owner === 'haus' || owner === 'gemeinsam') ? whoChips(day, key) : '';
+  return `<div class="check-item ${done ? 'done' : ''} ${partial ? 'partial' : ''} ${readonly ? 'readonly' : ''}" role="button" tabindex="0" aria-pressed="${done}" data-day="${day}" data-key="${esc(key)}" data-owner="${owner}">
     <div class="check-box">✓</div>
     <div class="check-label">${esc(label)}</div>
     ${note ? `<div class="check-note">${esc(note)}</div>` : ''}
+    ${chips ? `<div class="who-wrap">${chips}</div>` : ''}
   </div>`;
 }
 
+/* ---------- Ampel (Hausregel, beide bestätigen) ---------- */
+function ampelHTML(day, r) {
+  const key = 'routine:' + r.id;
+  const c = checkers(day, key);
+  const n = PERSON_KEYS.filter(p => c[p]).length;
+  const state = n === 2 ? 'gruen' : n === 1 ? 'gelb' : 'rot';
+  const mine = !!c[me];
+  const status = PERSON_KEYS.map(p => `<span class="ampel-who ${c[p] ? 'ok' : ''}">${nameOf(p)} ${c[p] ? '✓' : '…'}</span>`).join('');
+  const headline = state === 'gruen'
+    ? (r.gate_slot === 'abend' ? 'Grün – ab ins Bett ♡' : 'Grün – Kaffee! ☕')
+    : `${esc(r.title)} – ${esc(r.gate || '')}`;
+  return `
+    <div class="ampel ampel-${state}">
+      <div class="ampel-light" aria-label="${state}"></div>
+      <div class="ampel-main">
+        <div class="ampel-slot">${r.gate_slot === 'abend' ? 'Abend-Ampel' : 'Morgen-Ampel'}</div>
+        <div class="ampel-title">${headline}</div>
+        <div class="ampel-status">${status}</div>
+        <button class="btn small ${mine ? 'subtle' : 'primary'} ampel-btn" data-ampel="${r.id}">${mine ? 'Meine Bestätigung zurücknehmen' : 'Ich bestätige ✓'}</button>
+      </div>
+    </div>`;
+}
+
 /* ---------- Ansicht: Heute ---------- */
+function personToggleHTML() {
+  return `
+    <div class="seg-toggle">
+      ${PERSON_KEYS.slice().sort((a, b) => (a === me ? -1 : b === me ? 1 : 0)).map(p => `
+        <button class="seg ${viewPerson === p ? 'active' : ''}" data-person="${p}">${p === me ? 'Mein Tag' : genitiv(p) + ' Tag'}</button>`).join('')}
+    </div>`;
+}
+
 function renderHeute() {
   const now = new Date();
   const day = todayISO();
   const hour = now.getHours();
-  const hello = hour < 11 ? 'Guten Morgen, Laura' : hour < 18 ? 'Hallo, Laura' : 'Guten Abend, Laura';
+  const hello = hour < 11 ? `Guten Morgen, ${nameOf(me)}` : hour < 18 ? `Hallo, ${nameOf(me)}` : `Guten Abend, ${nameOf(me)}`;
   const quote = QUOTES[dayOfYear(now) % QUOTES.length];
-  const { done, total } = todayProgress();
+  const P = viewPerson;
+  const isMe = P === me;
+  const { done, total } = todayProgress(P);
   const pct = total ? Math.round(done / total * 100) : 0;
   const complete = total > 0 && done === total;
 
-  const groups = routinesBySection();
-  const sections = Object.keys(groups)
-    .sort((a, b) => (SECTION_META[a]?.order || 9) - (SECTION_META[b]?.order || 9))
-    .map(sec => `
+  // Hausregeln mit Ampel — immer oben, für beide gleich
+  const ampeln = ampelRoutines();
+  const ampelCard = ampeln.length ? `
+    <div class="card ampel-card">
+      <h2 class="section-title">Hausregeln</h2>
+      ${ampeln.map(r => ampelHTML(day, r)).join('')}
+    </div>` : '';
+
+  // weitere gemeinsame Routinen (ohne Ampel)
+  const sharedGroups = routinesBySection('gemeinsam');
+  delete sharedGroups.ampel;
+  const sharedItems = Object.values(sharedGroups).flat();
+  const sharedCard = sharedItems.length ? `
+    <div class="card">
+      <h2 class="section-title">Gemeinsam</h2>
+      ${sharedItems.map(r => checkItemHTML(day, 'routine:' + r.id, r.title, '', 'gemeinsam')).join('')}
+    </div>` : '';
+
+  // persönliche Routinen der angezeigten Person
+  const groups = routinesBySection(P);
+  const secKeys = Object.keys(groups).sort((a, b) => (SECTION_META[a]?.order || 9) - (SECTION_META[b]?.order || 9));
+  const sections = secKeys.length ? secKeys.map(sec => `
       <div class="card">
         <h2 class="section-title">${esc(SECTION_META[sec]?.label || sec)}</h2>
-        ${groups[sec].map(r => checkItemHTML(day, 'routine:' + r.id, r.title)).join('')}
-      </div>`).join('');
+        ${groups[sec].map(r => checkItemHTML(day, 'routine:' + r.id, r.title, '', P)).join('')}
+      </div>`).join('')
+    : `<div class="card"><p class="empty-note">${isMe ? 'Du hast noch keine eigenen Routinen – leg dir welche unter „Anpassen" an. ♡' : `${nameOf(P)} hat noch keine eigenen Routinen.`}</p></div>`;
 
-  const todaysTasks = tasksForDate(now);
+  const todaysTasks = tasksForDate(now, P);
   const dueTasks = todaysTasks.filter(t => isBiweeklyDue(t, now));
   const pausedTasks = todaysTasks.filter(t => !isBiweeklyDue(t, now));
+  const taskNote = t => [t.owner !== 'haus' ? nameOf(t.owner) : '', t.cadence === 'biweekly' ? '2-wöchentlich' : ''].filter(Boolean).join(' · ');
   const tasksHTML = `
     <div class="card">
       <h2 class="section-title">Haushalt heute</h2>
       ${dueTasks.length
-        ? dueTasks.map(t => checkItemHTML(day, 'task:' + t.id, t.title, t.cadence === 'biweekly' ? '2-wöchentlich' : '')).join('')
+        ? dueTasks.map(t => checkItemHTML(day, 'task:' + t.id, t.title, taskNote(t), t.owner)).join('')
         : '<p class="empty-note">Heute steht kein Haushalt an – wie schön! ♡</p>'}
       ${pausedTasks.map(t => `<div class="check-item skip-week"><div class="check-box"></div>
         <div class="check-label">${esc(t.title)}</div><div class="check-note">erst nächste Woche</div></div>`).join('')}
@@ -151,8 +272,9 @@ function renderHeute() {
   const timerRunning = timerInterval !== null;
   const timerStarted = timerRunning || timerPaused;
   const mainLabel = timerRunning ? 'Pause' : (timerPaused ? 'Weiter ♡' : 'Timer starten');
-  const zoneDone = isChecked(day, 'zone');
-  const timerBlock = zoneDone
+  const zoneDone = hasChecked(day, 'zone', P);
+  const timerBlock = !isMe ? ''
+    : zoneDone
     ? '<p class="zone-desc" style="margin:4px 0 2px">Für heute geschafft ♡</p>'
     : `<div class="zone-row">
         <div class="timer-display ${timerRunning ? 'running' : ''} ${timerPaused ? 'paused' : ''}" id="timer-display">
@@ -167,13 +289,13 @@ function renderHeute() {
       <h2 class="section-title">♡ 15-Minuten-Zone</h2>
       <p class="zone-desc">Ein Bereich, 15 Minuten, Timer an – mehr nicht.</p>
       ${timerBlock}
-      <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft')}</div>
+      <div style="margin-top:10px">${checkItemHTML(day, 'zone', '15-Minuten-Zone geschafft', '', P)}</div>
     </div>`;
 
   const banner = complete ? `
     <div class="card celebrate-banner">
-      <span class="script big">${CELEBRATE_MESSAGES[dayOfYear(now) % CELEBRATE_MESSAGES.length]}</span>
-      <p class="celebrate-sub">Alle Häkchen gesetzt – der Rest des Tages gehört dir. ♡</p>
+      <span class="script big">${isMe ? CELEBRATE_MESSAGES[dayOfYear(now) % CELEBRATE_MESSAGES.length] : `${nameOf(P)} hat alles geschafft!`}</span>
+      <p class="celebrate-sub">${isMe ? 'Alle Häkchen gesetzt – der Rest des Tages gehört dir. ♡' : 'Vielleicht ein kleines Danke wert? ♡'}</p>
     </div>` : '';
 
   return `
@@ -182,7 +304,11 @@ function renderHeute() {
       <div class="date">${formatDateLong(now)}</div>
     </div>
     <div class="card quote-card"><span class="q-heart">♡</span>${esc(quote)}</div>
+    ${ampelCard}
+    ${sharedCard}
+    ${personToggleHTML()}
     <div class="card progress-card">
+      <div class="progress-who">${isMe ? 'Du' : esc(nameOf(P))}</div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
       <div class="progress-label">${complete ? '<span class="progress-done">Geschafft!</span>' : `${done} von ${total}`}</div>
     </div>
@@ -193,22 +319,35 @@ function renderHeute() {
 }
 
 /* ---------- Ansicht: To-dos ---------- */
+function ownerBadge(owner) {
+  return `<span class="owner-badge owner-${owner}">${esc(OWNER_META[owner]?.label || owner)}</span>`;
+}
 function renderTodos() {
   const day = todayISO();
-  const open = store.state.todos.filter(t => !t.done_at).sort((a, b) => a.pos - b.pos);
+  const order = ['haus', me, partnerOf(me)];
+  const open = store.state.todos.filter(t => !t.done_at)
+    .sort((a, b) => order.indexOf(a.owner) - order.indexOf(b.owner) || a.pos - b.pos);
   const doneToday = store.state.todos
     .filter(t => t.done_at && t.done_at.slice(0, 10) === day)
     .sort((a, b) => b.done_at.localeCompare(a.done_at));
 
-  const openCard = `
-    <div class="card">
-      <h2 class="section-title">Offen ${open.length ? `<span class="badge">${open.length}</span>` : ''}</h2>
-      ${open.length ? open.map(t => `
-        <div class="check-item" data-todo="${t.id}">
+  const groupTitle = o => o === 'haus' ? 'Fürs Haus' : o === me ? 'Meine' : genitiv(o);
+  const groupsHTML = order.map(o => {
+    const list = open.filter(t => t.owner === o);
+    if (!list.length) return '';
+    return `<div class="hist-group-title">${esc(groupTitle(o))} <span class="badge">${list.length}</span></div>` +
+      list.map(t => `
+        <div class="check-item ${canToggle(t.owner) ? '' : 'readonly'}" data-todo="${t.id}">
           <div class="check-box">✓</div>
           <div class="check-label">${esc(t.title)}</div>
           <button class="btn small subtle todo-edit" data-edit-todo="${t.id}">✎</button>
-        </div>`).join('') : '<p class="empty-note">Gerade nichts Einmaliges offen – wie schön! ♡</p>'}
+        </div>`).join('');
+  }).join('');
+
+  const openCard = `
+    <div class="card">
+      <h2 class="section-title">Offen ${open.length ? `<span class="badge">${open.length}</span>` : ''}</h2>
+      ${open.length ? groupsHTML : '<p class="empty-note">Gerade nichts Einmaliges offen – wie schön! ♡</p>'}
       <div style="margin-top:10px"><button class="btn primary small" id="add-todo">+ To-do</button></div>
     </div>`;
 
@@ -216,9 +355,10 @@ function renderTodos() {
     <div class="card">
       <h2 class="section-title">Heute erledigt</h2>
       ${doneToday.map(t => `
-        <div class="check-item done" data-todo="${t.id}">
+        <div class="check-item done ${canToggle(t.owner) ? '' : 'readonly'}" data-todo="${t.id}">
           <div class="check-box">✓</div>
           <div class="check-label">${esc(t.title)}</div>
+          ${t.done_by ? `<div class="who-wrap"><span class="who who-${t.done_by}">${PEOPLE[t.done_by]?.short || ''}</span></div>` : ''}
         </div>`).join('')}
     </div>` : '';
 
@@ -238,13 +378,14 @@ function renderWoche() {
     const tasks = tasksForDate(date);
     const due = tasks.filter(t => isBiweeklyDue(t, date));
     const paused = tasks.filter(t => !isBiweeklyDue(t, date));
+    const note = t => [t.owner !== 'haus' ? PEOPLE[t.owner]?.name || '' : '', t.cadence === 'biweekly' ? '2-wö.' : ''].filter(Boolean).join(' · ');
     cards.push(`
       <div class="card day-card ${isToday ? 'today' : ''}">
         <div class="day-title">${WEEKDAY_NAMES[i + 1]} · ${date.getDate()}.${date.getMonth() + 1}.</div>
-        ${due.map(t => checkItemHTML(dayIso, 'task:' + t.id, t.title, t.cadence === 'biweekly' ? '2-wö.' : '')).join('')}
+        ${due.map(t => checkItemHTML(dayIso, 'task:' + t.id, t.title, note(t), t.owner)).join('')}
         ${paused.map(t => `<div class="check-item skip-week"><div class="check-box"></div>
           <div class="check-label">${esc(t.title)}</div><div class="check-note">nächste Wo.</div></div>`).join('')}
-        <div style="margin-top:6px">${checkItemHTML(dayIso, 'zone', '15-Minuten-Zone')}</div>
+        <div style="margin-top:6px">${checkItemHTML(dayIso, 'zone', 'Meine 15-Minuten-Zone', '', me)}</div>
       </div>`);
   }
   return `<div class="week-grid">${cards.join('')}</div>`;
@@ -253,19 +394,33 @@ function renderWoche() {
 /* ---------- Ansicht: Regeln ---------- */
 function renderRegeln() {
   const rules = store.state.rules.slice().sort((a, b) => a.pos - b.pos);
+  const ampeln = ampelRoutines();
+  const ruleList = list => list.map(r => `<div class="rule-item"><span class="rule-heart">♡</span><span class="grow">${esc(r.text)}</span></div>`).join('');
+  const haus = rules.filter(r => r.owner === 'haus' || r.owner === 'gemeinsam');
+  const personCards = PERSON_KEYS.map(p => {
+    const list = rules.filter(r => r.owner === p);
+    return list.length ? `<div class="card"><h2 class="section-title">${esc(genitiv(p))} Regeln</h2>${ruleList(list)}</div>` : '';
+  }).join('');
   return `
     <div class="card">
-      <h2 class="section-title">Meine Regeln</h2>
-      ${rules.map(r => `<div class="rule-item"><span class="rule-heart">♡</span><span class="grow">${esc(r.text)}</span></div>`).join('')}
+      <h2 class="section-title">Unsere Hausregeln</h2>
+      ${ampeln.map(r => `<div class="rule-item"><span class="rule-heart">●</span><span class="grow"><b>${esc(r.title)}</b>, ${esc(r.gate || '')}.<br><span class="settings-sub">Wird grün, wenn ihr beide bestätigt habt.</span></span></div>`).join('')}
+      ${ruleList(haus)}
+      ${!ampeln.length && !haus.length ? '<p class="empty-note">Noch keine Hausregeln.</p>' : ''}
     </div>
+    ${personCards}
     <div class="card">
-      <h2 class="section-title">Projektzeit</h2>
+      <h2 class="section-title">Lauras Projektzeit</h2>
       <p class="projekt-text">${esc(store.state.settings.projektzeit || DEFAULT_PROJEKTZEIT)}</p>
     </div>
-    <p class="empty-note" style="text-align:center">Ändern kannst du beides unter „Anpassen" ✎</p>`;
+    <p class="empty-note" style="text-align:center">Ändern könnt ihr alles unter „Anpassen" ✎</p>`;
 }
 
 /* ---------- Ansicht: Anpassen ---------- */
+function ownerOptions(selected, allowed = ['haus', 'gemeinsam', 'dennis', 'laura']) {
+  return allowed.map(o => `<option value="${o}" ${selected === o ? 'selected' : ''}>${esc(OWNER_META[o].label)}${o === 'gemeinsam' ? ' (beide bestätigen)' : o === 'haus' ? ' (einer reicht)' : ''}</option>`).join('');
+}
+
 function renderEinstellungen() {
   const tasksByDay = {};
   for (const t of store.state.tasks.filter(t => t.active).sort((a, b) => a.pos - b.pos)) {
@@ -276,50 +431,59 @@ function renderEinstellungen() {
       <h2 class="section-title">${WEEKDAY_NAMES[wd]}</h2>
       ${(tasksByDay[wd] || []).map(t => `
         <div class="settings-row">
-          <span class="grow">${esc(t.title)} ${t.cadence === 'biweekly' ? '<span class="badge">2-wöchentlich</span>' : ''}</span>
+          <span class="grow">${esc(t.title)} ${t.owner !== 'haus' ? ownerBadge(t.owner) : ''} ${t.cadence === 'biweekly' ? '<span class="badge">2-wöchentlich</span>' : ''}</span>
           <button class="btn small subtle" data-edit-task="${t.id}">✎</button>
         </div>`).join('') || '<p class="empty-note">Noch keine Aufgaben.</p>'}
       <div style="margin-top:10px"><button class="btn small" data-add-task="${wd}">+ Aufgabe</button></div>
     </div>`).join('');
 
-  const groups = routinesBySection();
-  const routineBlocks = Object.keys(SECTION_META)
-    .sort((a, b) => SECTION_META[a].order - SECTION_META[b].order)
-    .map(sec => `
+  const routineBlocks = ['gemeinsam', me, partnerOf(me)].map(owner => {
+    const groups = routinesBySection(owner);
+    const secs = Object.keys(groups).sort((a, b) => (SECTION_META[a]?.order || 9) - (SECTION_META[b]?.order || 9));
+    const title = owner === 'gemeinsam' ? 'Gemeinsam' : owner === me ? 'Meine Routinen' : `${genitiv(owner)} Routinen`;
+    return `
       <div class="card">
-        <h2 class="section-title">${SECTION_META[sec].label}</h2>
-        ${(groups[sec] || []).map(r => `
-          <div class="settings-row">
-            <span class="grow">${esc(r.title)}</span>
-            <button class="btn small subtle" data-edit-routine="${r.id}">✎</button>
-          </div>`).join('') || '<p class="empty-note">Noch keine Punkte.</p>'}
-        <div style="margin-top:10px"><button class="btn small" data-add-routine="${sec}">+ Punkt</button></div>
-      </div>`).join('');
+        <h2 class="section-title">${esc(title)}</h2>
+        ${secs.map(sec => `
+          <div class="hist-group-title">${esc(SECTION_META[sec]?.label || sec)}</div>
+          ${groups[sec].map(r => `
+            <div class="settings-row">
+              <span class="grow">${esc(r.title)}${r.gate ? ` <span class="settings-sub">– ${esc(r.gate)}</span>` : ''}</span>
+              <button class="btn small subtle" data-edit-routine="${r.id}">✎</button>
+            </div>`).join('')}`).join('') || '<p class="empty-note">Noch keine Punkte.</p>'}
+        <div style="margin-top:10px"><button class="btn small" data-add-routine="${owner}">+ Punkt</button></div>
+      </div>`;
+  }).join('');
 
   const rules = store.state.rules.slice().sort((a, b) => a.pos - b.pos);
   const rulesBlock = `
     <div class="card">
-      <h2 class="section-title">Meine Regeln</h2>
+      <h2 class="section-title">Regeln</h2>
       ${rules.map(r => `
         <div class="settings-row">
-          <span class="grow">${esc(r.text)}</span>
+          <span class="grow">${esc(r.text)} ${ownerBadge(r.owner)}</span>
           <button class="btn small subtle" data-edit-rule="${r.id}">✎</button>
         </div>`).join('')}
       <div style="margin-top:10px">
         <button class="btn small" id="add-rule">+ Regel</button>
-        <button class="btn small subtle" id="edit-projektzeit">Projektzeit-Text ändern</button>
+        <button class="btn small subtle" id="edit-projektzeit">Lauras Projektzeit-Text ändern</button>
       </div>
+      <p class="settings-sub" style="margin-top:8px">Eine Hausregel mit Ampel (beide bestätigen) legst du oben unter „Gemeinsam → + Punkt" an.</p>
     </div>`;
 
   const sync = store.mode === 'cloud'
     ? `<span class="sync-status ok">● Synchronisiert über die Cloud${store.online === false ? ' (gerade offline, nutzt lokalen Stand)' : ''}</span>`
-    : `<span class="sync-status off">● Lokaler Modus – Daten bleiben auf diesem Gerät</span>`;
+    : `<span class="sync-status off">● Testmodus – Daten bleiben auf diesem Gerät</span>`;
+  const whoBlock = store.mode === 'cloud'
+    ? `<p style="margin-bottom:8px">Angemeldet als <b>${esc(nameOf(me))}</b> <button class="btn small subtle" id="logout">Abmelden</button></p>`
+    : `<p style="margin-bottom:8px">Testmodus – ich bin: ${PERSON_KEYS.map(p => `<button class="btn small ${p === me ? 'primary' : 'subtle'}" data-be="${p}">${nameOf(p)}</button>`).join(' ')}</p>`;
   const infoBlock = `
     <div class="card">
       <h2 class="section-title">App</h2>
+      ${whoBlock}
       <p style="margin-bottom:8px">${sync}</p>
-      <p class="settings-sub" style="margin-bottom:8px">Version ${APP_VERSION} · Die App sucht selbst nach Updates und sagt dir Bescheid. ♡</p>
-      <p class="settings-sub">Tipp: In Safari über „Teilen → Zum Home-Bildschirm" installieren, dann fühlt sich die App wie eine echte App an. ♡</p>
+      <p class="settings-sub" style="margin-bottom:8px">Wilma · Version ${APP_VERSION} · Die App sucht selbst nach Updates und sagt Bescheid. ♡</p>
+      <p class="settings-sub">Tipp: In Safari über „Teilen → Zum Home-Bildschirm" installieren, dann fühlt sich Wilma wie eine echte App an. ♡</p>
     </div>`;
 
   return `<h2 class="section-title" style="margin-bottom:10px">Routinen</h2>${routineBlocks}
@@ -532,7 +696,8 @@ function expenseModal(prefillCatId) {
 async function toggleTodo(id) {
   const t = store.state.todos.find(t => t.id === id);
   if (!t) return;
-  await store.updateTodo(id, { done_at: t.done_at ? null : new Date().toISOString() });
+  if (!canToggle(t.owner)) { showToast(`Das hakt ${nameOf(t.owner)} selbst ab ♡`); return; }
+  await store.updateTodo(id, t.done_at ? { done_at: null, done_by: null } : { done_at: new Date().toISOString(), done_by: me });
   render();
 }
 
@@ -541,7 +706,9 @@ function todoModal(todo) {
   openModal(`
     <h3>${isNew ? 'Neues To-do' : 'To-do bearbeiten'}</h3>
     <label>Was steht an?</label>
-    <input type="text" id="m-title" value="${todo ? esc(todo.title) : ''}" placeholder="z. B. Geschenk für Mama besorgen">
+    <input type="text" id="m-title" value="${todo ? esc(todo.title) : ''}" placeholder="z. B. Glühbirne Flur tauschen">
+    <label>Für wen?</label>
+    <select id="m-owner">${ownerOptions(todo ? todo.owner : me, ['haus', 'dennis', 'laura'])}</select>
     <div class="modal-actions">
       ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
       <button class="btn small subtle" id="m-cancel">Abbrechen</button>
@@ -551,7 +718,8 @@ function todoModal(todo) {
   document.getElementById('m-save').onclick = async () => {
     const title = document.getElementById('m-title').value.trim();
     if (!title) return;
-    if (isNew) await store.addTodo(title); else await store.updateTodo(todo.id, { title });
+    const owner = document.getElementById('m-owner').value;
+    if (isNew) await store.addTodo(title, owner); else await store.updateTodo(todo.id, { title, owner });
     closeModal(); render();
   };
   if (!isNew) document.getElementById('m-delete').onclick = async () => {
@@ -590,36 +758,32 @@ function verlaufPeriods(mode, n) {
   return periods;
 }
 
-function firstCheckDay() {
-  const days = Object.keys(store.state.checks).filter(d => Object.keys(store.state.checks[d]).length);
+// erster Tag, an dem diese Person (oder für Haus-Aufgaben irgendwer) etwas abgehakt hat
+function firstCheckDay(person) {
+  const days = Object.keys(store.state.checks).filter(d =>
+    Object.values(store.state.checks[d]).some(c => c[person]));
   return days.length ? days.sort()[0] : null;
 }
 
-function dayExpected(date) {
-  return store.state.routines.filter(r => r.active).length
-    + tasksForDate(date).filter(t => isBiweeklyDue(t, date)).length
-    + 1; // 15-Minuten-Zone
-}
-
-// Anteil erledigter Punkte in einem Zeitraum (nur Tage seit dem ersten Häkchen, nicht in der Zukunft)
-function periodStats(start, end) {
-  const first = firstCheckDay();
+// Anteil erledigter Punkte einer Person in einem Zeitraum (nur Tage seit ihrem ersten Häkchen, nicht in der Zukunft)
+function periodStats(start, end, person) {
+  const first = firstCheckDay(person);
   if (!first) return { pct: null, done: 0, expected: 0 };
   const today = todayISO();
   let done = 0, expected = 0;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const iso = toISO(d);
     if (iso < first || iso > today) continue;
-    const exp = dayExpected(d);
-    const got = store.state.checks[iso] ? Object.keys(store.state.checks[iso]).length : 0;
-    expected += exp;
-    done += Math.min(got, exp);
+    for (const it of dayItems(d, person)) {
+      expected++;
+      if (doneForPerson(iso, it.key, it.owner, person)) done++;
+    }
   }
   return { pct: expected ? Math.round(done / expected * 100) : null, done, expected };
 }
 
-// Anzahl Häkchen je Punkt in einem Zeitraum (+ mögliche Tage)
-function itemPeriodCounts(start, end) {
+// Erledigt-Zähler je Punkt in einem Zeitraum (+ mögliche Tage)
+function itemPeriodCounts(start, end, person) {
   const today = todayISO();
   const counts = {};
   let daysCounted = 0;
@@ -628,11 +792,12 @@ function itemPeriodCounts(start, end) {
     const iso = toISO(d);
     if (iso > today) continue;
     daysCounted++;
-    for (const t of tasksForDate(d)) {
+    for (const t of tasksForDate(d, person)) {
       if (isBiweeklyDue(t, d)) taskPossible[t.id] = (taskPossible[t.id] || 0) + 1;
     }
-    const dayChecks = store.state.checks[iso] || {};
-    for (const key of Object.keys(dayChecks)) counts[key] = (counts[key] || 0) + 1;
+    for (const it of dayItems(d, person)) {
+      if (doneForPerson(iso, it.key, it.owner, person)) counts[it.key] = (counts[it.key] || 0) + 1;
+    }
   }
   return { counts, days: daysCounted, taskPossible };
 }
@@ -647,21 +812,22 @@ function renderVerlauf() {
   const isWeek = verlaufMode === 'woche';
   const n = isWeek ? 8 : 6;
   const periods = verlaufPeriods(verlaufMode, n);
-  const first = firstCheckDay();
+  const P = viewPerson;
+  const first = firstCheckDay(P);
 
   const toggle = `
     <div class="seg-toggle">
       <button class="seg ${isWeek ? 'active' : ''}" data-mode="woche">Wochen</button>
       <button class="seg ${isWeek ? '' : 'active'}" data-mode="monat">Monate</button>
-    </div>`;
+    </div>` + personToggleHTML();
 
   if (!first) {
     return toggle + `<div class="card" style="text-align:center">
-      <p class="empty-note">Sobald du die ersten Häkchen setzt, wächst hier dein Verlauf. ♡</p></div>`;
+      <p class="empty-note">${P === me ? 'Sobald du die ersten Häkchen setzt, wächst hier dein Verlauf. ♡' : `Sobald ${nameOf(P)} die ersten Häkchen setzt, wächst hier der Verlauf. ♡`}</p></div>`;
   }
 
   // Balken-Chart
-  const stats = periods.map(p => ({ ...p, ...periodStats(p.start, p.end) }));
+  const stats = periods.map(p => ({ ...p, ...periodStats(p.start, p.end, P) }));
   const visible = stats.filter(s => s.pct !== null);
   const bars = visible.map((s, i) => `
     <div class="vbar-wrap ${i === visible.length - 1 ? 'current' : ''}">
@@ -683,7 +849,7 @@ function renderVerlauf() {
 
   const chartCard = `
     <div class="card">
-      <h2 class="section-title">Regelmäßiges</h2>
+      <h2 class="section-title">${P === me ? 'Mein Regelmäßiges' : esc(genitiv(P)) + ' Regelmäßiges'}</h2>
       <div class="vchart">${bars}</div>
       ${trendText}
     </div>`;
@@ -691,18 +857,20 @@ function renderVerlauf() {
   // Einzelauswertung: aktueller vs. vorheriger Zeitraum
   const curP = periods[periods.length - 1];
   const prevP = periods[periods.length - 2];
-  const curC = itemPeriodCounts(curP.start, curP.end);
-  const prevC = prevP ? itemPeriodCounts(prevP.start, prevP.end) : { counts: {}, days: 0, taskPossible: {} };
+  const curC = itemPeriodCounts(curP.start, curP.end, P);
+  const prevC = prevP ? itemPeriodCounts(prevP.start, prevP.end, P) : { counts: {}, days: 0, taskPossible: {} };
 
   const rows = [];
-  const groups = routinesBySection();
-  for (const sec of Object.keys(SECTION_META).sort((a, b) => SECTION_META[a].order - SECTION_META[b].order)) {
-    for (const r of (groups[sec] || [])) {
-      const key = 'routine:' + r.id;
-      rows.push({ label: r.title, cur: curC.counts[key] || 0, possible: curC.days, prev: prevC.counts[key] || 0 });
+  for (const owner of ['gemeinsam', P]) {
+    const groups = routinesBySection(owner);
+    for (const sec of Object.keys(SECTION_META).sort((a, b) => SECTION_META[a].order - SECTION_META[b].order)) {
+      for (const r of (groups[sec] || [])) {
+        const key = 'routine:' + r.id;
+        rows.push({ label: r.title + (owner === 'gemeinsam' ? ' (gemeinsam)' : ''), cur: curC.counts[key] || 0, possible: curC.days, prev: prevC.counts[key] || 0 });
+      }
     }
   }
-  for (const t of store.state.tasks.filter(t => t.active).sort((a, b) => a.weekday - b.weekday || a.pos - b.pos)) {
+  for (const t of store.state.tasks.filter(t => t.active && (t.owner === 'haus' || t.owner === 'gemeinsam' || t.owner === P)).sort((a, b) => a.weekday - b.weekday || a.pos - b.pos)) {
     const key = 'task:' + t.id;
     rows.push({ label: t.title, cur: curC.counts[key] || 0, possible: curC.taskPossible[t.id] || 0, prev: prevC.counts[key] || 0 });
   }
@@ -722,7 +890,7 @@ function renderVerlauf() {
 
   // Erledigte To-dos, gruppiert nach Zeitraum
   const doneTodos = store.state.todos
-    .filter(t => t.done_at)
+    .filter(t => t.done_at && (t.owner === P || t.done_by === P || (t.owner === 'haus' && !t.done_by)))
     .sort((a, b) => b.done_at.localeCompare(a.done_at));
   const groupsMap = new Map();
   for (const t of doneTodos) {
@@ -768,6 +936,8 @@ function taskModal(task, weekday) {
     <h3>${isNew ? 'Neue Aufgabe' : 'Aufgabe bearbeiten'}</h3>
     <label>Was ist zu tun?</label>
     <input type="text" id="m-title" value="${task ? esc(task.title) : ''}" placeholder="z. B. Hundeschule 🐾">
+    <label>Wer?</label>
+    <select id="m-owner">${ownerOptions(task ? task.owner : 'haus')}</select>
     <label>Wochentag</label>
     <select id="m-weekday">
       ${[1, 2, 3, 4, 5, 6, 7].map(wd => `<option value="${wd}" ${(task ? task.weekday : weekday) === wd ? 'selected' : ''}>${WEEKDAY_NAMES[wd]}</option>`).join('')}
@@ -812,7 +982,7 @@ function taskModal(task, weekday) {
         anchor = toISO(nextMon);
       }
     }
-    const patch = { title, weekday: Number(document.getElementById('m-weekday').value), cadence, anchor };
+    const patch = { title, owner: document.getElementById('m-owner').value, weekday: Number(document.getElementById('m-weekday').value), cadence, anchor };
     if (isNew) await store.addTask(patch); else await store.updateTask(task.id, patch);
     closeModal(); render();
   };
@@ -821,26 +991,56 @@ function taskModal(task, weekday) {
   };
 }
 
-function routineModal(item, section) {
+function routineModal(item, owner) {
   const isNew = !item;
+  const curOwner = item ? item.owner : owner;
+  const curSec = item ? item.section : (curOwner === 'gemeinsam' ? 'ampel' : 'alltag');
   openModal(`
     <h3>${isNew ? 'Neuer Routine-Punkt' : 'Routine bearbeiten'}</h3>
     <label>Bezeichnung</label>
-    <input type="text" id="m-title" value="${item ? esc(item.title) : ''}" placeholder="z. B. Dehnen (5 Minuten)">
+    <input type="text" id="m-title" value="${item ? esc(item.title) : ''}" placeholder="z. B. Spülmaschine ausräumen">
+    <label>Wer?</label>
+    <select id="m-owner">${ownerOptions(curOwner, ['gemeinsam', 'dennis', 'laura'])}</select>
     <label>Gehört zu</label>
     <select id="m-section">
-      ${Object.keys(SECTION_META).map(s => `<option value="${s}" ${(item ? item.section : section) === s ? 'selected' : ''}>${SECTION_META[s].label}</option>`).join('')}
+      ${Object.keys(SECTION_META).map(s => `<option value="${s}" ${curSec === s ? 'selected' : ''}>${SECTION_META[s].label}</option>`).join('')}
     </select>
+    <div id="m-gate-row">
+      <label>Wann muss es erledigt sein?</label>
+      <input type="text" id="m-gate" value="${item && item.gate ? esc(item.gate) : ''}" placeholder="z. B. bevor wir schlafen gehen">
+      <label>Ampel</label>
+      <select id="m-slot">
+        <option value="morgen" ${item && item.gate_slot === 'morgen' ? 'selected' : ''}>Morgen-Ampel</option>
+        <option value="abend" ${!item || item.gate_slot !== 'morgen' ? 'selected' : ''}>Abend-Ampel</option>
+      </select>
+      <p class="settings-sub" style="margin-top:6px">Eine Ampel wird erst grün, wenn ihr beide bestätigt habt.</p>
+    </div>
     <div class="modal-actions">
       ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
       <button class="btn small subtle" id="m-cancel">Abbrechen</button>
       <button class="btn small primary" id="m-save">Speichern ♡</button>
     </div>`);
+  const secSel = document.getElementById('m-section');
+  const ownSel = document.getElementById('m-owner');
+  const sync = () => {
+    const isAmpel = secSel.value === 'ampel';
+    if (isAmpel) ownSel.value = 'gemeinsam';
+    ownSel.disabled = isAmpel;
+    document.getElementById('m-gate-row').style.display = isAmpel ? '' : 'none';
+  };
+  secSel.onchange = sync; sync();
   document.getElementById('m-cancel').onclick = closeModal;
   document.getElementById('m-save').onclick = async () => {
     const title = document.getElementById('m-title').value.trim();
     if (!title) return;
-    const patch = { title, section: document.getElementById('m-section').value };
+    const section = secSel.value;
+    const isAmpel = section === 'ampel';
+    const patch = {
+      title, section,
+      owner: isAmpel ? 'gemeinsam' : ownSel.value,
+      gate: isAmpel ? (document.getElementById('m-gate').value.trim() || null) : null,
+      gate_slot: isAmpel ? document.getElementById('m-slot').value : null,
+    };
     if (isNew) await store.addRoutine(patch); else await store.updateRoutine(item.id, patch);
     closeModal(); render();
   };
@@ -853,8 +1053,10 @@ function ruleModal(rule) {
   const isNew = !rule;
   openModal(`
     <h3>${isNew ? 'Neue Regel' : 'Regel bearbeiten'}</h3>
-    <label>Deine Regel</label>
+    <label>Regel</label>
     <textarea id="m-text">${rule ? esc(rule.text) : ''}</textarea>
+    <label>Für wen?</label>
+    <select id="m-owner">${ownerOptions(rule ? rule.owner : 'haus', ['haus', 'dennis', 'laura'])}</select>
     <div class="modal-actions">
       ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
       <button class="btn small subtle" id="m-cancel">Abbrechen</button>
@@ -864,7 +1066,8 @@ function ruleModal(rule) {
   document.getElementById('m-save').onclick = async () => {
     const text = document.getElementById('m-text').value.trim();
     if (!text) return;
-    if (isNew) await store.addRule(text); else await store.updateRule(rule.id, text);
+    const owner = document.getElementById('m-owner').value;
+    if (isNew) await store.addRule(text, owner); else await store.updateRule(rule.id, { text, owner });
     closeModal(); render();
   };
   if (!isNew) document.getElementById('m-delete').onclick = async () => {
@@ -937,19 +1140,32 @@ function render() {
   document.getElementById('top-sub').textContent =
     currentTab === 'woche' ? 'Wochenplan Haushalt' :
     currentTab === 'todos' ? 'Einmal erledigen, für immer abgehakt' :
-    currentTab === 'budget' ? 'Dein Geld im Blick' :
-    currentTab === 'verlauf' ? 'Dein Weg, sichtbar gemacht' :
-    currentTab === 'regeln' ? 'Meine Regeln & Projektzeit' :
-    currentTab === 'einstellungen' ? 'Alles nach deinem Geschmack' :
-    'Dein Tag · ' + now.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
+    currentTab === 'budget' ? 'Unser Geld im Blick' :
+    currentTab === 'verlauf' ? 'Unser Weg, sichtbar gemacht' :
+    currentTab === 'regeln' ? 'Hausregeln & persönliche Regeln' :
+    currentTab === 'einstellungen' ? 'Alles nach eurem Geschmack' :
+    'Unser Tag · ' + now.toLocaleDateString('de-DE', { day: 'numeric', month: 'long' });
 
   // Events
   view.querySelectorAll('.check-item[data-key]').forEach(el => {
-    el.onclick = () => toggleCheck(el.dataset.day, el.dataset.key);
+    el.onclick = () => toggleCheck(el.dataset.day, el.dataset.key, el.dataset.owner);
     el.onkeydown = e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCheck(el.dataset.day, el.dataset.key); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCheck(el.dataset.day, el.dataset.key, el.dataset.owner); }
     };
   });
+  view.querySelectorAll('[data-ampel]').forEach(b => b.onclick = () => toggleCheck(todayISO(), 'routine:' + b.dataset.ampel, 'gemeinsam'));
+  view.querySelectorAll('.seg[data-person]').forEach(b => b.onclick = () => { viewPerson = b.dataset.person; render(); });
+  view.querySelectorAll('[data-be]').forEach(b => b.onclick = () => {
+    me = viewPerson = b.dataset.be;
+    try { localStorage.setItem('wilma-me', me); } catch (e) {}
+    render();
+  });
+  const logout = document.getElementById('logout');
+  if (logout) logout.onclick = async () => {
+    if (!confirm('Auf diesem Gerät abmelden?')) return;
+    await store.sb.auth.signOut();
+    location.reload();
+  };
   const timerBtn = document.getElementById('timer-btn');
   if (timerBtn) timerBtn.onclick = toggleTimer;
   const timerReset = document.getElementById('timer-reset');
@@ -1022,9 +1238,11 @@ document.getElementById('modal-wrap').addEventListener('click', e => {
 });
 
 /* ---------- Boot ---------- */
-async function bootWithStore(s) {
+async function bootWithStore(s, person) {
   store = s;
   await store.init();
+  me = person;
+  viewPerson = me;
   store.onChange = () => render();
   const { done, total } = todayProgress();
   dayWasComplete = total > 0 && done === total;
@@ -1033,29 +1251,74 @@ async function bootWithStore(s) {
   render();
 }
 
+function localPerson() {
+  try { const p = localStorage.getItem('wilma-me'); if (PERSON_KEYS.includes(p)) return p; } catch (e) {}
+  return 'dennis';
+}
+
+// Anmeldung ohne Passwort: E-Mail → 6-stelliger Code aus der Mail → angemeldet (bleibt dauerhaft)
+function showLogin(sb) {
+  const login = document.getElementById('login');
+  login.classList.remove('hidden');
+  const emailEl = document.getElementById('login-email');
+  const codeRow = document.getElementById('login-code-row');
+  const codeEl = document.getElementById('login-code');
+  const errEl = document.getElementById('login-error');
+  const infoEl = document.getElementById('login-info');
+  const sendBtn = document.getElementById('login-send');
+  const verifyBtn = document.getElementById('login-verify');
+
+  sendBtn.onclick = async () => {
+    const email = emailEl.value.trim().toLowerCase();
+    errEl.textContent = ''; infoEl.textContent = '';
+    if (!email.includes('@')) { errEl.textContent = 'Bitte deine E-Mail-Adresse eintragen.'; return; }
+    sendBtn.disabled = true;
+    // shouldCreateUser: Dennis' Konto entsteht beim ersten Code. Zugriff auf Daten haben trotzdem nur die zwei E-Mails in `members`.
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+    sendBtn.disabled = false;
+    if (error) { errEl.textContent = 'Das hat nicht geklappt – ist das die richtige Adresse? (' + error.message + ')'; return; }
+    infoEl.textContent = 'Schau in dein Postfach: Dort ist ein Code mit 6 Ziffern. ♡';
+    codeRow.classList.remove('hidden');
+    codeEl.focus();
+  };
+  verifyBtn.onclick = async () => {
+    const email = emailEl.value.trim().toLowerCase();
+    const token = codeEl.value.replace(/\D/g, '');
+    errEl.textContent = '';
+    if (token.length < 6) { errEl.textContent = 'Der Code hat 6 Ziffern.'; return; }
+    verifyBtn.disabled = true;
+    const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
+    verifyBtn.disabled = false;
+    if (error) { errEl.textContent = 'Der Code passt nicht oder ist abgelaufen – fordere einfach einen neuen an.'; return; }
+    await enterCloud(sb);
+  };
+  codeEl.onkeydown = e => { if (e.key === 'Enter') verifyBtn.click(); };
+  emailEl.onkeydown = e => { if (e.key === 'Enter') sendBtn.click(); };
+}
+
+async function enterCloud(sb) {
+  const cs = new CloudStore(sb);
+  const person = await cs.whoAmI();
+  if (!person) {
+    await sb.auth.signOut();
+    document.getElementById('login').classList.remove('hidden');
+    document.getElementById('login-error').textContent = 'Diese E-Mail gehört nicht zu Wilma.';
+    return;
+  }
+  await bootWithStore(cs, person);
+}
+
 async function boot() {
   const forceLocal = new URLSearchParams(location.search).has('local');
   const cloudConfigured = typeof SUPABASE_URL === 'string' && SUPABASE_URL && SUPABASE_ANON_KEY;
   if (!cloudConfigured || forceLocal) {
-    await bootWithStore(new LocalStore());
+    await bootWithStore(new LocalStore(), localPerson());
     return;
   }
-  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'wilma-auth' } });
   const { data: { session } } = await sb.auth.getSession();
-  if (session) {
-    await bootWithStore(new CloudStore(sb));
-  } else {
-    document.getElementById('login').classList.remove('hidden');
-    document.getElementById('login-btn').onclick = async () => {
-      const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-pass').value;
-      const errEl = document.getElementById('login-error');
-      errEl.textContent = '';
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) { errEl.textContent = 'Das hat leider nicht geklappt – bitte prüf E-Mail & Passwort.'; return; }
-      await bootWithStore(new CloudStore(sb));
-    };
-  }
+  if (session) await enterCloud(sb);
+  else showLogin(sb);
 }
 
 // Bei Tageswechsel oder Rückkehr zur App aktualisieren
@@ -1082,7 +1345,7 @@ async function checkForUpdate() {
       updateBannerShown = true;
       const b = document.createElement('button');
       b.className = 'update-banner';
-      b.textContent = '✨ Ein kleines Update ist da – antippen zum Aktualisieren ♡';
+      b.textContent = '✨ Wilma hat ein kleines Update – antippen zum Aktualisieren ♡';
       b.onclick = async () => {
         try {
           if (window.caches) {

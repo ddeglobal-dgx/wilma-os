@@ -1,4 +1,4 @@
-/* ============ Betriebssystem Laura — Look & Feel ============ */
+/* ============ Wilma App — Look & Feel (übernommen von Betriebssystem Laura) ============ */
 :root {
   --bg: #faf4ec;
   --card: #fffdf9;
@@ -345,3 +345,55 @@ h2.section-title {
 }
 .celebrate-banner .script.big { font-size: 1.7rem; color: var(--rose-deep); }
 .celebrate-sub { color: var(--ink-soft); font-size: 0.85rem; margin-top: 2px; }
+
+/* ---------- Wilma: zwei Personen ---------- */
+.who-wrap { display: flex; gap: 3px; }
+.who {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.62rem; font-weight: 700; color: #fff;
+}
+.who-dennis { background: #8fa8b8; }
+.who-laura { background: var(--rose-deep); }
+.check-item.partial .check-box { border-color: var(--gold); background: #fbf1e1; color: var(--gold); }
+.check-item.readonly { cursor: default; }
+.check-item.readonly .check-box { border-style: dashed; }
+.owner-badge { font-size: 0.66rem; border-radius: 99px; padding: 2px 8px; color: #fff; white-space: nowrap; }
+.owner-haus { background: var(--gold); }
+.owner-gemeinsam { background: #9fb592; }
+.owner-dennis { background: #8fa8b8; }
+.owner-laura { background: var(--rose-deep); }
+.progress-who { font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); white-space: nowrap; }
+
+/* ---------- Ampel ---------- */
+.ampel-card .section-title { margin-bottom: 12px; }
+.ampel { display: flex; align-items: flex-start; gap: 14px; padding: 12px 4px; border-bottom: 1px dashed var(--line); }
+.ampel:last-child { border-bottom: none; }
+.ampel-light {
+  width: 34px; height: 34px; min-width: 34px; border-radius: 50%;
+  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.15), 0 0 0 4px var(--chip-soft);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.ampel-rot .ampel-light { background: #d98b84; }
+.ampel-gelb .ampel-light { background: #e6c27a; }
+.ampel-gruen .ampel-light { background: #8fb47f; box-shadow: inset 0 -3px 6px rgba(0,0,0,0.12), 0 0 0 4px #e3eedb, 0 0 18px rgba(143,180,127,0.55); }
+.ampel-main { flex: 1; min-width: 0; }
+.ampel-slot { font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+.ampel-title { font-weight: 500; margin: 1px 0 4px; }
+.ampel-gruen .ampel-title { color: #6f9160; font-weight: 600; }
+.ampel-status { display: flex; gap: 14px; font-size: 0.78rem; color: var(--ink-soft); flex-wrap: wrap; }
+.ampel-btn { margin-top: 10px; }
+.ampel-light { margin-top: 4px; }
+.ampel-who.ok { color: #6f9160; font-weight: 600; }
+
+/* ---------- Login mit Code ---------- */
+.login-code-row { display: flex; flex-direction: column; gap: 10px; }
+.login-code-row input { text-align: center; letter-spacing: 0.4em; font-size: 1.2rem; }
+
+/* ---------- Hinweis-Toast ---------- */
+.toast {
+  position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);
+  background: var(--ink); color: #fff; font-size: 0.82rem; padding: 9px 16px; border-radius: 99px;
+  opacity: 0; pointer-events: none; transition: all 0.25s ease; z-index: 95; max-width: 90vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
