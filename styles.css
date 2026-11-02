@@ -11,6 +11,8 @@
   --rose-deep: #c08076;
   --gold: #c9a27a;
   --done: #b5c9a8;
+  --sage: #8fae80;
+  --sage-soft: #e6efe0;
   --shadow: 0 4px 18px rgba(120, 95, 70, 0.10);
   --radius: 18px;
 }
@@ -353,7 +355,7 @@ h2.section-title {
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 0.62rem; font-weight: 700; color: #fff;
 }
-.who-dennis { background: #8fa8b8; }
+.who-dennis { background: var(--sage); }
 .who-laura { background: var(--rose-deep); }
 .check-item.partial .check-box { border-color: var(--gold); background: #fbf1e1; color: var(--gold); }
 .check-item.readonly { cursor: default; }
@@ -397,3 +399,73 @@ h2.section-title {
   opacity: 0; pointer-events: none; transition: all 0.25s ease; z-index: 95; max-width: 90vw; text-align: center;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ============ Wilma OS 3.0 ============ */
+.who.off { background: transparent; color: var(--ink-soft); box-shadow: inset 0 0 0 1.5px var(--line); }
+.check-main { flex: 1; min-width: 0; }
+.check-main .check-label { display: inline; }
+.pts { display: inline-block; font-size: 0.66rem; font-weight: 600; border-radius: 99px; padding: 1px 7px; vertical-align: 1px; white-space: nowrap; }
+.pts-soul { background: #f6dcd6; color: var(--rose-deep); }
+.pts-wilma { background: var(--sage-soft); color: #5f7f52; }
+.check-item.done .pts { opacity: 0.55; }
+
+/* Buchen */
+.book-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.book-chip { font-size: 0.7rem; border-radius: 99px; padding: 2px 9px; color: #fff; }
+.book-laura { background: var(--rose-deep); }
+.book-dennis { background: var(--sage); }
+.book-btn { padding: 4px 11px; font-size: 0.66rem; }
+.slot-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Unser Stand */
+.stand-card { cursor: pointer; }
+.stand-rings { display: flex; justify-content: space-around; gap: 12px; margin: 6px 0 12px; }
+.ring-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ring { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center;
+  background: conic-gradient(var(--ring-c) calc(var(--p) * 1%), var(--chip-soft) 0); }
+.ring-soul { --ring-c: var(--rose); }
+.ring-wilma { --ring-c: var(--sage); }
+.ring.reached { box-shadow: 0 0 0 4px #fff, 0 0 16px rgba(143, 174, 128, 0.45); }
+.ring-inner { width: 74px; height: 74px; border-radius: 50%; background: var(--card); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15; }
+.ring-inner b { font-family: 'Cormorant Garamond', serif; font-size: 1.45rem; }
+.ring-inner span { font-size: 0.6rem; color: var(--ink-soft); }
+.ring-label { font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+.stand-people { display: flex; flex-direction: column; gap: 6px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.stand-person { display: flex; align-items: center; gap: 8px; font-size: 0.88rem; }
+.stand-person > span:nth-child(2) { flex: 1; }
+.stand-periods { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; font-size: 0.76rem; color: var(--ink-soft); }
+.stand-periods b { color: var(--ink); font-weight: 600; display: inline-block; min-width: 62px; }
+
+/* To-dos */
+.todo-meta { display: flex; gap: 6px; align-items: center; margin-top: 3px; flex-wrap: wrap; }
+.owner-haus { background: var(--gold); }
+.owner-dennis { background: var(--sage); }
+.owner-laura { background: var(--rose-deep); }
+.owner-jeder { background: #b49a84; }
+.owner-gemeinsam { background: #c9a27a; }
+.due { font-size: 0.68rem; color: var(--ink-soft); }
+.due.today { color: var(--rose-deep); font-weight: 600; }
+.due.over { color: #b06060; font-weight: 600; }
+
+/* Verlauf */
+.vpair { flex: 1; width: 100%; display: flex; gap: 3px; justify-content: center; }
+.vpair .vbar-track { position: relative; max-width: 16px; }
+.vbar-soul { background: linear-gradient(180deg, var(--rose), var(--rose-deep)); }
+.vbar-wilma { background: linear-gradient(180deg, #a9c39c, var(--sage)); }
+.vgoal { position: absolute; left: -2px; right: -2px; border-top: 1.5px dashed var(--ink-soft); opacity: 0.6; }
+.vlegend { display: flex; gap: 14px; font-size: 0.7rem; color: var(--ink-soft); margin-bottom: 8px; }
+.lg::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.lg-soul::before { background: var(--rose); }
+.lg-wilma::before { background: var(--sage); }
+.lg-goal::before { height: 0; border-top: 1.5px dashed var(--ink-soft); vertical-align: 3px; }
+.trend-line div { margin: 2px 0; }
+
+/* Anpassen */
+.goals-grid { display: grid; grid-template-columns: 1fr 72px 72px; gap: 6px 10px; align-items: center; font-size: 0.85rem; }
+.goals-grid input { width: 100%; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 8px; font: inherit; text-align: center; }
+.check-line { display: flex !important; align-items: center; gap: 8px; text-transform: none !important; letter-spacing: 0 !important; font-size: 0.85rem !important; color: var(--ink) !important; }
+.login-card input + input { margin-top: 0; }
+.stand-head { font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-soft); }
+.stand-head > span:first-child { width: 22px; }
+.stand-head > span:nth-child(3), .stand-head > span:nth-child(4) { min-width: 30px; text-align: center; }
+.stand-person .pts { min-width: 30px; text-align: center; }

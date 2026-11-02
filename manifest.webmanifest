@@ -1,7 +1,7 @@
 {
-  "name": "Wilma – unser Haus",
-  "short_name": "Wilma",
-  "description": "Unser gemeinsamer Raum fürs Haus: Hausregeln, Routinen, Wochenplan, To-dos.",
+  "name": "Wilma OS",
+  "short_name": "Wilma OS",
+  "description": "Unser gemeinsames Betriebssystem für Alltag, Haus und Geld.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

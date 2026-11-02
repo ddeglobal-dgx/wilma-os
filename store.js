@@ -1,7 +1,11 @@
-/* ============ Wilma App — Datenhaltung: lokal (localStorage) oder Cloud (Supabase) ============ */
+/* ============ Wilma OS — Datenhaltung: lokal (localStorage) oder Cloud (Supabase) ============ */
 
 const LS_KEY = 'wilma-state-v1';
 const LEGACY_LS_KEY = 'bsl-state-v1';   // Betriebssystem Laura (gleiche Adresse gibt es nicht, nur für lokale Tests)
+
+function toISODate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function newId() {
   return (crypto.randomUUID) ? crypto.randomUUID()
@@ -13,14 +17,17 @@ function buildDefaultState() {
     tasks: DEFAULT_TASKS.map((t, i) => ({
       id: newId(), title: t.title, weekday: t.weekday, owner: 'haus',
       cadence: t.cadence, anchor: DEFAULT_ANCHOR, pos: i, active: true,
+      groesse: t.groesse || 1, zu_zweit: !!t.zu_zweit,
     })),
     routines: DEFAULT_ROUTINES.map((r, i) => ({
-      id: newId(), section: r.section, title: r.title, owner: r.owner || 'laura',
+      id: newId(), section: r.section, title: r.title, owner: r.owner || 'jeder',
       gate: r.gate || null, gate_slot: r.gate_slot || null, pos: i, active: true,
+      groesse: r.groesse || 1, zu_zweit: !!r.zu_zweit,
     })),
     rules: DEFAULT_RULES.map((text, i) => ({ id: newId(), text, owner: 'laura', pos: i })),
     checks: {},   // { '2026-10-09': { 'task:<id>': { laura: true }, 'routine:<id>': { laura: true, dennis: true } } }
-    settings: { projektzeit: DEFAULT_PROJEKTZEIT },
+    settings: { projektzeit: DEFAULT_PROJEKTZEIT, ziele: DEFAULT_GOALS },
+    bookings: [],     // [{ day, item_key, person, slot }]
     budgetCats: [],   // [{ id, name, emoji, pos, active }]
     budgets: {},      // { '2026-08': { <catId>: amountCents } }
     expenses: [],     // [{ id, cat_id, amount (Cent), note, day 'YYYY-MM-DD' }]
@@ -33,6 +40,11 @@ function migrateState(state) {
   if (!state.budgets) state.budgets = {};
   if (!state.expenses) state.expenses = [];
   if (!state.todos) state.todos = [];
+  if (!state.bookings) state.bookings = [];
+  if (!state.settings.ziele) state.settings.ziele = DEFAULT_GOALS;
+  for (const x of [...state.tasks, ...state.routines]) { if (!x.groesse) x.groesse = 1; if (x.zu_zweit == null) x.zu_zweit = false; }
+  for (const t of state.todos) if (!t.groesse) t.groesse = 3;
+  for (const c of state.budgetCats) if (!c.owner) c.owner = 'gemeinsam';
   // Alt-Daten aus „Betriebssystem Laura": alles gehörte Laura, Haushalt wird Haus
   for (const t of state.tasks) if (!t.owner) t.owner = 'haus';
   for (const r of state.routines) if (!r.owner) r.owner = 'laura';
@@ -105,6 +117,15 @@ class LocalStore {
 
   async setSetting(key, value) { this.state.settings[key] = value; this._save(); }
 
+  async book(day, item_key, person, slot) {
+    this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
+    this.state.bookings.push({ day, item_key, person, slot }); this._save();
+  }
+  async unbook(day, item_key, person) {
+    this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
+    this._save();
+  }
+
   async addBudgetCat(c) {
     const row = { id: newId(), emoji: '♡', pos: this.state.budgetCats.length, active: true, ...c };
     this.state.budgetCats.push(row); this._save();
@@ -136,8 +157,8 @@ class LocalStore {
     this.state.expenses = this.state.expenses.filter(e => e.id !== id); this._save();
   }
 
-  async addTodo(title, owner) {
-    const row = { id: newId(), title, owner, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null };
+  async addTodo(fields) {
+    const row = { id: newId(), groesse: 3, due: null, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null, ...fields };
     this.state.todos.push(row); this._save();
     return row;
   }
@@ -171,7 +192,8 @@ class CloudStore {
   }
 
   async _loadAll() {
-    const [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos] = await Promise.all([
+    const since = toISODate(new Date(Date.now() - 3 * 86400000));
+    const [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings] = await Promise.all([
       this.sb.from('tasks').select('*').order('pos'),
       this.sb.from('routine_items').select('*').order('pos'),
       this.sb.from('rules').select('*').order('pos'),
@@ -181,15 +203,16 @@ class CloudStore {
       this.sb.from('budgets').select('*'),
       this.sb.from('expenses').select('*').order('day'),
       this.sb.from('todos').select('*').order('pos'),
+      this.sb.from('bookings').select('*').gte('day', since),
     ]);
-    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos]) if (r.error) throw r.error;
+    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings]) if (r.error) throw r.error;
 
     const checkMap = {};
     for (const c of checks.data) {
       const d = (checkMap[c.day] = checkMap[c.day] || {});
       (d[c.item_key] = d[c.item_key] || {})[c.user_key || 'laura'] = true;
     }
-    const settingsMap = { projektzeit: DEFAULT_PROJEKTZEIT };
+    const settingsMap = { projektzeit: DEFAULT_PROJEKTZEIT, ziele: DEFAULT_GOALS };
     for (const s of settings.data) settingsMap[s.key] = s.value?.v ?? s.value;
 
     const budgetMap = {};
@@ -201,7 +224,7 @@ class CloudStore {
       tasks: tasks.data, routines: routines.data, rules: rules.data,
       checks: checkMap, settings: settingsMap,
       budgetCats: cats.data, budgets: budgetMap, expenses: expenses.data,
-      todos: todos.data,
+      todos: todos.data, bookings: bookings.data,
     };
   }
 
@@ -313,6 +336,17 @@ class CloudStore {
     await this.sb.from('settings').upsert({ key, value: { v: value } });
   }
 
+  async book(day, item_key, person, slot) {
+    this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
+    this.state.bookings.push({ day, item_key, person, slot }); this._cache();
+    await this.sb.from('bookings').upsert({ day, item_key, person, slot });
+  }
+  async unbook(day, item_key, person) {
+    this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
+    this._cache();
+    await this.sb.from('bookings').delete().eq('day', day).eq('item_key', item_key).eq('person', person);
+  }
+
   async addBudgetCat(c) {
     const row = { id: newId(), emoji: '♡', pos: this.state.budgetCats.length, active: true, ...c };
     this.state.budgetCats.push(row); this._cache();
@@ -353,8 +387,8 @@ class CloudStore {
     await this.sb.from('expenses').delete().eq('id', id);
   }
 
-  async addTodo(title, owner) {
-    const row = { id: newId(), title, owner, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null };
+  async addTodo(fields) {
+    const row = { id: newId(), groesse: 3, due: null, pos: this.state.todos.length, created_at: new Date().toISOString(), done_at: null, done_by: null, ...fields };
     this.state.todos.push(row); this._cache();
     await this.sb.from('todos').insert(row);
     return row;

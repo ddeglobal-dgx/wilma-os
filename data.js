@@ -1,4 +1,4 @@
-/* ============ Wilma App — Standard-Daten: Personen, Wochenplan, Routinen, Regeln, Sprüche ============ */
+/* ============ Wilma OS — Standard-Daten: Personen, Besitz, Größen, Wochenplan, Routinen, Regeln, Sprüche ============ */
 
 // Die zwei Bewohner. Wer gerade angemeldet ist, steht in `me` (app.js).
 const PEOPLE = {
@@ -8,72 +8,88 @@ const PEOPLE = {
 const PERSON_KEYS = ['dennis', 'laura'];
 
 // Wem gehört ein Punkt?
-//   haus      = allgemein: einer erledigt es, das reicht
-//   dennis / laura = persönlich: nur die Person selbst hakt ab
-//   gemeinsam = wird erst grün, wenn BEIDE bestätigt haben
+//   gemeinsam      = Ampel: wird erst grün, wenn BEIDE bestätigt haben          → Wilma-Punkte
+//   haus           = einer erledigt es, das reicht (oder zu zweit, wenn erlaubt) → Wilma-Punkte
+//   jeder          = gleiche Aufgabe für beide, jeder hakt für sich ab          → Soul-Punkte
+//   dennis / laura = persönlich                                                → Soul-Punkte
 const OWNER_META = {
   gemeinsam: { label: 'Gemeinsam', order: 0 },
   haus:      { label: 'Haus',      order: 1 },
-  laura:     { label: 'Laura',     order: 2 },
-  dennis:    { label: 'Dennis',    order: 3 },
+  jeder:     { label: 'Jeder für sich', order: 2 },
+  laura:     { label: 'Laura',     order: 3 },
+  dennis:    { label: 'Dennis',    order: 4 },
 };
+function pointArtOf(owner) { return (owner === 'haus' || owner === 'gemeinsam') ? 'wilma' : 'soul'; }
+
+// Größe = Punkte
+const SIZES = [1, 3, 5, 10];
+const SIZE_META = { 1: 'klein', 3: 'mittel', 5: 'groß', 10: 'Projekt' };
+const ZONE_SIZE = 3;
+
+// Zeitfenster fürs Buchen
+const SLOTS = { morgen: 'morgens', mittag: 'mittags', abend: 'abends' };
+
+// Team-Ziele: Erledigungsquote in Prozent
+const DEFAULT_GOALS = {
+  soul:  { woche: 70, monat: 70, quartal: 70, jahr: 70 },
+  wilma: { woche: 70, monat: 70, quartal: 70, jahr: 70 },
+};
+const PERIOD_META = { woche: 'Woche', monat: 'Monat', quartal: 'Quartal', jahr: 'Jahr' };
 
 // Ankerwoche für alle 2-wöchentlichen Aufgaben (Montag). In "Anpassen" pro Aufgabe umschaltbar.
 const DEFAULT_ANCHOR = '2026-08-03';
 
 const DEFAULT_TASKS = [
   // Montag
-  { title: 'Garten', weekday: 1, cadence: 'weekly' },
-  { title: 'Betten beziehen', weekday: 1, cadence: 'biweekly' },
-  { title: 'Staub unten', weekday: 1, cadence: 'weekly' },
+  { title: 'Garten', weekday: 1, cadence: 'weekly', groesse: 5, zu_zweit: true },
+  { title: 'Betten beziehen', weekday: 1, cadence: 'biweekly', groesse: 3 },
+  { title: 'Staub unten', weekday: 1, cadence: 'weekly', groesse: 3 },
   // Dienstag
   { title: 'Holztisch', weekday: 2, cadence: 'weekly' },
   { title: 'Stuhlkissen', weekday: 2, cadence: 'biweekly' },
-  { title: 'Spüle intensiv', weekday: 2, cadence: 'weekly' },
-  { title: 'Küchenschränke außen', weekday: 2, cadence: 'biweekly' },
+  { title: 'Spüle intensiv', weekday: 2, cadence: 'weekly', groesse: 3 },
+  { title: 'Küchenschränke außen', weekday: 2, cadence: 'biweekly', groesse: 3 },
   // Mittwoch
-  { title: 'Vorgarten', weekday: 3, cadence: 'weekly' },
+  { title: 'Vorgarten', weekday: 3, cadence: 'weekly', groesse: 3, zu_zweit: true },
   { title: 'Schminktisch', weekday: 3, cadence: 'weekly' },
   { title: 'Müll OG', weekday: 3, cadence: 'weekly' },
   { title: 'Refill Gäste-WC', weekday: 3, cadence: 'biweekly' },
   { title: 'Refill Bad OG', weekday: 3, cadence: 'weekly' },
   // Donnerstag
-  { title: 'Saugen und wischen UG', weekday: 4, cadence: 'weekly' },
+  { title: 'Saugen und wischen UG', weekday: 4, cadence: 'weekly', groesse: 5 },
   { title: 'Couchdecken', weekday: 4, cadence: 'weekly' },
   { title: 'Fensterbank Wohnzimmer', weekday: 4, cadence: 'weekly' },
   // Freitag
   { title: 'Refill Küche', weekday: 5, cadence: 'weekly' },
-  { title: 'Kühlschrank', weekday: 5, cadence: 'biweekly' },
+  { title: 'Kühlschrank', weekday: 5, cadence: 'biweekly', groesse: 5 },
   { title: 'Müll UG', weekday: 5, cadence: 'weekly' },
   // Samstag
   { title: 'Waschbecken OG', weekday: 6, cadence: 'weekly' },
-  { title: 'WC OG', weekday: 6, cadence: 'weekly' },
-  { title: 'WC unten', weekday: 6, cadence: 'weekly' },
+  { title: 'WC OG', weekday: 6, cadence: 'weekly', groesse: 3 },
+  { title: 'WC unten', weekday: 6, cadence: 'weekly', groesse: 3 },
   { title: 'Wanne ausspülen', weekday: 6, cadence: 'weekly' },
   { title: 'Wanne ausspülen OG', weekday: 6, cadence: 'weekly' },
-  { title: 'Dusche Grund', weekday: 6, cadence: 'biweekly' },
+  { title: 'Dusche Grund', weekday: 6, cadence: 'biweekly', groesse: 5 },
   // Sonntag
-  { title: 'Saugen und wischen OG', weekday: 7, cadence: 'weekly' },
-  { title: 'Teppich Bad', weekday: 7, cadence: 'biweekly' },
-  { title: 'Staub oben', weekday: 7, cadence: 'weekly' },
-  { title: 'Bügeln', weekday: 7, cadence: 'weekly' },
+  { title: 'Saugen und wischen OG', weekday: 7, cadence: 'weekly', groesse: 5 },
+  { title: 'Teppich Bad', weekday: 7, cadence: 'biweekly', groesse: 3 },
+  { title: 'Staub oben', weekday: 7, cadence: 'weekly', groesse: 3 },
+  { title: 'Bügeln', weekday: 7, cadence: 'weekly', groesse: 5 },
 ];
 
 const DEFAULT_ROUTINES = [
   // Hausregeln mit Ampel — gemeinsam, grün erst wenn beide bestätigt haben
-  { section: 'ampel', owner: 'gemeinsam', title: 'OG in Ordnung', gate: 'bevor wir morgens Kaffee trinken', gate_slot: 'morgen' },
-  { section: 'ampel', owner: 'gemeinsam', title: 'EG in Ordnung', gate: 'bevor wir schlafen gehen', gate_slot: 'abend' },
-  // Lauras persönliche Routinen
-  { section: 'morgen', title: 'Aufstehen & Bad' },
-  { section: 'morgen', title: 'Betten kurz machen (OG)' },
-  { section: 'morgen', title: '5-Minuten-Ordnung oben' },
-  { section: 'morgen', title: 'Kaffee & Philosophieren ☕' },
-  { section: 'grow', title: 'Tarotkarte ziehen & deuten' },
-  { section: 'grow', title: 'Tagebuch schreiben' },
-  { section: 'grow', title: 'Visualisierung (Augen zu)' },
-  { section: 'grow', title: 'Lesen (ca. 15 Minuten)' },
-  { section: 'hunde', title: 'Hunderunde morgens 🐾' },
-  { section: 'hunde', title: 'Hunderunde abends 🐾' },
+  { section: 'ampel', owner: 'gemeinsam', groesse: 3, title: 'OG in Ordnung', gate: 'bevor wir morgens Kaffee trinken', gate_slot: 'morgen' },
+  { section: 'ampel', owner: 'gemeinsam', groesse: 3, title: 'EG in Ordnung', gate: 'bevor wir schlafen gehen', gate_slot: 'abend' },
+  // Morgenroutine — für beide gleich, jeder hakt für sich ab
+  { section: 'morgen', owner: 'jeder', groesse: 1, title: 'Aufstehen & Bad' },
+  { section: 'morgen', owner: 'jeder', groesse: 1, title: 'Betten kurz machen (OG)' },
+  { section: 'morgen', owner: 'jeder', groesse: 1, title: '5-Minuten-Ordnung oben' },
+  { section: 'morgen', owner: 'jeder', groesse: 3, title: 'Kaffee & Philosophieren ☕' },
+  { section: 'morgen', owner: 'jeder', groesse: 5, title: 'Time to Grow ✨' },
+  // Hunde — einer bucht, der andere kann sich dazubuchen
+  { section: 'hunde', owner: 'haus', groesse: 3, zu_zweit: true, title: 'Hunderunde morgens 🐾' },
+  { section: 'hunde', owner: 'haus', groesse: 3, zu_zweit: true, title: 'Hunderunde abends 🐾' },
 ];
 
 const SECTION_META = {
