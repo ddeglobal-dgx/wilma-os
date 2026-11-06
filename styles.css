@@ -469,3 +469,14 @@ h2.section-title {
 .stand-head > span:first-child { width: 22px; }
 .stand-head > span:nth-child(3), .stand-head > span:nth-child(4) { min-width: 30px; text-align: center; }
 .stand-person .pts { min-width: 30px; text-align: center; }
+
+/* ============ Wilma OS 3.1 ============ */
+.stand-remain { display: flex; justify-content: space-around; gap: 10px; font-size: 0.8rem; color: var(--ink-soft); margin: -4px 0 10px; flex-wrap: wrap; }
+.remain b { color: var(--ink); }
+.remain.ok { color: #6f9160; font-weight: 600; }
+.stand-periods { display: block; font-size: 0.74rem; color: var(--ink-soft); margin-top: 10px; line-height: 1.6; }
+.stand-periods b { color: var(--ink); font-weight: 600; display: inline-block; min-width: 58px; }
+.feed-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px dashed var(--line); font-size: 0.86rem; }
+.feed-row:last-of-type { border-bottom: none; }
+.feed-time { font-size: 0.72rem; color: var(--ink-soft); min-width: 38px; font-variant-numeric: tabular-nums; }
+.login-hint { font-size: 0.78rem; margin-top: 4px; }

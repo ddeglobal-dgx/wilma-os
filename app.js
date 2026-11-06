@@ -1,6 +1,6 @@
 /* ============ Wilma OS — App-Logik (früher „Betriebssystem Laura" / Wilma App) ============ */
 
-const APP_VERSION = '3.0.0';
+const APP_VERSION = '3.1.0';
 
 let store = null;
 let me = null;            // wer dieses Gerät benutzt: 'dennis' | 'laura'
@@ -77,8 +77,9 @@ function showToast(text) {
 async function toggleCheck(day, key, owner, zuZweit) {
   if (!canToggle(owner)) { showToast(`Das hakt ${nameOf(owner)} selbst ab ♡`); return; }
   const c = checkers(day, key);
-  if (owner === 'haus' && !zuZweit && !c[me] && Object.keys(c).length) {
-    showToast(`Hat ${Object.keys(c).map(nameOf).join(' & ')} schon erledigt ♡`); return;
+  if (owner === 'haus' && !c[me] && Object.keys(c).length) {
+    if (!zuZweit) { showToast(`Hat ${Object.keys(c).map(nameOf).join(' & ')} schon erledigt ♡`); return; }
+    if (!bookingsFor(day, key).some(b => b.person === me)) { showToast('Erst dazubuchen, dann abhaken ♡'); return; }
   }
   const wasDone = isDoneFor(day, key, owner);
   const on = !c[me];
@@ -90,17 +91,18 @@ async function toggleCheck(day, key, owner, zuZweit) {
     timerPaused = false; timerSecondsLeft = 15 * 60;
   }
   render();
-  const item = itemOf(key);
-  if (on && item) showToast(`+${item.groesse} ${pointArtOf(item.owner) === 'wilma' ? 'Wilma' : 'Soul'}-Punkte ♡`);
-  if (owner === 'gemeinsam' && on && !wasDone && isDoneFor(day, key, owner)) {
-    rainHearts(40);
-    showToast('Beide bestätigt – grün! ♡');
-  } else if (owner === 'gemeinsam' && on) {
-    showToast(`Bestätigt – jetzt fehlt noch ${nameOf(partnerOf(me))}.`);
+  if (on) {
+    const item = itemOf(key);
+    let msg = item ? ptsText(item.groesse, pointArtOf(item.owner)) : '';
+    if (owner === 'gemeinsam' && !wasDone && isDoneFor(day, key, owner)) { rainHearts(40); msg = 'Beide bestätigt – grün! ' + msg; }
+    else if (owner === 'gemeinsam') msg += ` · jetzt fehlt noch ${nameOf(partnerOf(me))}`;
+    showToast(msg + ' ♡');
+    celebrateGoals(goalsBefore);
+    maybeCelebrate();
   }
-  if (on) celebrateGoals(goalsBefore);
-  if (on) maybeCelebrate();
 }
+
+function ptsText(n, art) { return `+${n} ${art === 'wilma' ? 'Wilma' : 'Soul'}-${n === 1 ? 'Punkt' : 'Punkte'}`; }
 
 /* ---------- Punkte, Quoten, Ziele ----------
    Punkte werden nie gespeichert, sondern aus Häkchen × Größe berechnet.
@@ -147,22 +149,25 @@ function firstCheckDays() {
 }
 
 // Alle laut Plan fälligen Standardpunkte eines Tages: [{ key, owner, groesse }]
+// Für vergangene Tage zählt eine Aufgabe erst ab dem Tag, an dem sie angelegt wurde.
+function existedOn(x, iso) { return !x.created_at || x.created_at.slice(0, 10) <= iso; }
 function dayItems(date) {
+  const iso = toISO(date);
   const items = [];
-  for (const r of store.state.routines.filter(r => r.active)) items.push({ key: 'routine:' + r.id, owner: r.owner, groesse: r.groesse || 1 });
-  for (const t of tasksForDate(date)) if (isBiweeklyDue(t, date)) items.push({ key: 'task:' + t.id, owner: t.owner, groesse: t.groesse || 1 });
+  for (const r of store.state.routines.filter(r => r.active && existedOn(r, iso))) items.push({ key: 'routine:' + r.id, owner: r.owner, groesse: r.groesse || 1 });
+  for (const t of tasksForDate(date)) if (isBiweeklyDue(t, date) && existedOn(t, iso)) items.push({ key: 'task:' + t.id, owner: t.owner, groesse: t.groesse || 1 });
   items.push({ key: 'zone', owner: 'jeder', groesse: ZONE_SIZE });
   return items;
 }
 
 // Team-Quote einer Punkteart im Zeitraum. Jede Person zählt erst ab ihrem ersten Häkchen.
-function quota(art, start, end, first = firstCheckDays()) {
+function quota(art, start, end, first = firstCheckDays(), includeFuture = false) {
   const today = todayISO();
   let done = 0, expected = 0;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const iso = toISO(d);
-    if (iso > today) break;
-    const started = p => first[p] && iso >= first[p];
+    if (iso > today && !includeFuture) break;
+    const started = p => first[p] && (iso >= first[p] || iso > today);
     for (const it of dayItems(d)) {
       if (pointArtOf(it.owner) !== art) continue;
       const c = checkers(iso, it.key);
@@ -297,7 +302,7 @@ function ptsBadge(item) {
   if (!item) return '';
   return `<span class="pts pts-${pointArtOf(item.owner)}">+${item.groesse}</span>`;
 }
-function bookingsFor(day, key) { return store.state.bookings.filter(b => b.day === day && b.item_key === key); }
+function bookingsFor(day, key) { return store.state.bookings.filter(b => b.day === day && (key === null || b.item_key === key)); }
 function bookingHTML(day, key) {
   if (day !== todayISO()) return '';
   const list = bookingsFor(day, key);
@@ -377,18 +382,56 @@ function standHTML() {
     return `<div class="stand-person"><span class="who who-${p}">${PEOPLE[p].short}</span>
       <span>${esc(nameOf(p))}</span><span class="pts pts-soul">${pt.soul}</span><span class="pts pts-wilma">${pt.wilma}</span></div>`;
   }).join('');
+  // Wie viele Häkchen fehlen noch bis zum Wochenziel (ganze Woche inkl. kommender Tage)?
+  const remain = art => {
+    const full = quota(art, wk.start, wk.end, first, true);
+    if (!full.expected) return '';
+    const need = Math.ceil(g[art].woche / 100 * full.expected) - full.done;
+    const name = art === 'soul' ? 'Soul' : 'Wilma';
+    return need <= 0 ? `<span class="remain ok">${name}-Ziel geschafft ✓</span>`
+      : `<span class="remain">${name}: noch <b>${need}</b> ${need === 1 ? 'Häkchen' : 'Häkchen'}</span>`;
+  };
   const more = ['monat', 'quartal', 'jahr'].map(m => {
     const r = periodRange(m);
     const s = quota('soul', r.start, r.end, first), w = quota('wilma', r.start, r.end, first);
-    const f = (q, goal) => q.pct === null ? '–' : `${q.pct}%${q.pct >= goal ? ' ✓' : ''}`;
-    return `<div class="stand-period"><b>${PERIOD_META[m]}</b> Soul ${f(s, g.soul[m])} · Wilma ${f(w, g.wilma[m])}</div>`;
+    const f = q => q.pct === null ? '–' : `${q.pct}%`;
+    return `<div><b>${PERIOD_META[m]}</b> Soul ${f(s)} · Wilma ${f(w)}</div>`;
   }).join('');
   return `
     <div class="card stand-card" id="stand-card" role="button" tabindex="0">
       <h2 class="section-title">Unser Stand · ${esc(wk.label)}</h2>
       <div class="stand-rings">${ringHTML('soul', qs, g.soul.woche)}${ringHTML('wilma', qw, g.wilma.woche)}</div>
+      <div class="stand-remain">${remain('soul')}${remain('wilma')}</div>
       <div class="stand-people"><div class="stand-person stand-head"><span></span><span>Punkte diese Woche</span><span>Soul</span><span>Wilma</span></div>${people}</div>
-      <div class="stand-periods">${more}</div>
+      <div class="stand-periods">${more}<div class="settings-sub">antippen → Verlauf</div></div>
+    </div>`;
+}
+
+/* ---------- „Heute im Haus": wer hat heute wann was gemacht ---------- */
+function timeOf(v) { return (typeof v === 'string' && v.length > 10) ? v : null; }
+function hhmm(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
+function feedHTML(day) {
+  const entries = [];
+  for (const [key, c] of Object.entries(store.state.checks[day] || {})) {
+    const it = itemOf(key);
+    if (!it) continue;
+    for (const p of PERSON_KEYS) if (c[p]) entries.push({ t: timeOf(c[p]), p, text: it.title + ' ✓', pts: ptsBadge(it) });
+  }
+  for (const t of store.state.todos) {
+    if (t.done_at && t.done_at.slice(0, 10) === day && t.done_by) entries.push({ t: t.done_at, p: t.done_by, text: t.title + ' ✓', pts: `<span class="pts pts-wilma">+${t.groesse || 3}</span>` });
+  }
+  for (const b of bookingsFor(day, null)) {
+    const it = itemOf(b.item_key);
+    if (it) entries.push({ t: b.created_at || null, p: b.person, text: `übernimmt ${it.title} (${SLOTS[b.slot]})`, pts: '' });
+  }
+  if (!entries.length) return '';
+  entries.sort((a, b) => (b.t || '').localeCompare(a.t || ''));
+  const shown = entries.slice(0, 8);
+  return `
+    <div class="card feed-card">
+      <h2 class="section-title">Heute im Haus</h2>
+      ${shown.map(e => `<div class="feed-row"><span class="feed-time">${e.t ? hhmm(e.t) : '–'}</span><span class="who who-${e.p}">${PEOPLE[e.p].short}</span><span class="grow">${esc(e.text)}</span>${e.pts}</div>`).join('')}
+      ${entries.length > shown.length ? `<p class="settings-sub" style="margin-top:6px">… und ${entries.length - shown.length} weitere</p>` : ''}
     </div>`;
 }
 
@@ -480,6 +523,7 @@ function renderHeute() {
     ${standHTML()}
     ${banner}
     ${ampelCard}
+    ${feedHTML(day)}
     ${sections}
     ${tasksHTML}
     ${todoHTML}
@@ -918,7 +962,7 @@ async function toggleTodo(id) {
   const on = !t.done_at;
   await store.updateTodo(id, on ? { done_at: new Date().toISOString(), done_by: me } : { done_at: null, done_by: null });
   render();
-  if (on) showToast(`+${t.groesse || 3} Wilma-Punkte ♡`);
+  if (on) showToast(ptsText(t.groesse || 3, 'wilma') + ' ♡');
 }
 
 function todoModal(todo) {
@@ -967,14 +1011,14 @@ async function bookingAction(key, act) {
     render(); showToast(`${title} zurückgegeben`);
     return;
   }
+  const hour = new Date().getHours();
+  const guess = /abend/i.test(title) ? 'abend' : /morgen/i.test(title) ? 'morgen' : hour < 11 ? 'morgen' : hour < 16 ? 'mittag' : 'abend';
   if (act === 'join') {
     const other = bookingsFor(day, key).find(b => b.person !== me);
-    await store.book(day, key, me, other ? other.slot : 'abend');
+    await store.book(day, key, me, other ? other.slot : guess);
     render(); showToast(`Du bist bei „${title}" dabei ♡`);
     return;
   }
-  const hour = new Date().getHours();
-  const guess = /abend/i.test(title) ? 'abend' : /morgen/i.test(title) ? 'morgen' : hour < 11 ? 'morgen' : hour < 16 ? 'mittag' : 'abend';
   openModal(`
     <h3>${esc(title)}</h3>
     <label>Wann übernimmst du?</label>
@@ -1478,10 +1522,11 @@ async function bootWithStore(s, person) {
   render();
 }
 
-function localPerson() {
+function localPersonOrNull() {
   try { const p = localStorage.getItem('wilma-me'); if (PERSON_KEYS.includes(p)) return p; } catch (e) {}
-  return 'dennis';
+  return null;
 }
+function localPerson() { return localPersonOrNull() || 'dennis'; }
 
 // Anmeldung mit E-Mail + Passwort. Danach bleibt das Gerät dauerhaft angemeldet.
 function showLogin(sb) {
@@ -1507,13 +1552,20 @@ function showLogin(sb) {
 
 async function enterCloud(sb) {
   const cs = new CloudStore(sb);
-  const person = await cs.whoAmI();
+  const who = await cs.whoAmI();
+  let person = who.person;
+  if (!person && who.offline) {
+    // Kein Netz: die zuletzt bekannte Person dieses Geräts weiterverwenden (Daten aus dem Zwischenspeicher)
+    person = localPersonOrNull();
+    if (!person) { showLogin(sb); document.getElementById('login-error').textContent = 'Gerade kein Netz – bitte später noch einmal.'; return; }
+  }
   if (!person) {
     await sb.auth.signOut();
-    document.getElementById('login').classList.remove('hidden');
-    document.getElementById('login-error').textContent = 'Diese E-Mail gehört nicht zu Wilma.';
+    showLogin(sb);
+    document.getElementById('login-error').textContent = 'Diese E-Mail gehört nicht zu Wilma OS.';
     return;
   }
+  try { localStorage.setItem('wilma-me', person); } catch (e) {}
   await bootWithStore(cs, person);
 }
 

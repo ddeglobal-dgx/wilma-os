@@ -110,7 +110,7 @@ class LocalStore {
   async setCheck(day, key, who, on) {
     const d = this.state.checks[day] || (this.state.checks[day] = {});
     const c = d[key] || (d[key] = {});
-    if (on) c[who] = true; else delete c[who];
+    if (on) c[who] = new Date().toISOString(); else delete c[who];
     if (!Object.keys(c).length) delete d[key];
     this._save();
   }
@@ -119,7 +119,7 @@ class LocalStore {
 
   async book(day, item_key, person, slot) {
     this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
-    this.state.bookings.push({ day, item_key, person, slot }); this._save();
+    this.state.bookings.push({ day, item_key, person, slot, created_at: new Date().toISOString() }); this._save();
   }
   async unbook(day, item_key, person) {
     this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
@@ -210,7 +210,7 @@ class CloudStore {
     const checkMap = {};
     for (const c of checks.data) {
       const d = (checkMap[c.day] = checkMap[c.day] || {});
-      (d[c.item_key] = d[c.item_key] || {})[c.user_key || 'laura'] = true;
+      (d[c.item_key] = d[c.item_key] || {})[c.user_key || 'laura'] = c.checked_at || true;
     }
     const settingsMap = { projektzeit: DEFAULT_PROJEKTZEIT, ziele: DEFAULT_GOALS };
     for (const s of settings.data) settingsMap[s.key] = s.value?.v ?? s.value;
@@ -272,11 +272,12 @@ class CloudStore {
 
   // Wer ist angemeldet? E-Mail der Sitzung → 'dennis' | 'laura' (Tabelle members)
   async whoAmI() {
-    const { data: { user } } = await this.sb.auth.getUser();
-    if (!user) return null;
+    const { data: { user }, error: uErr } = await this.sb.auth.getUser();
+    if (uErr && !user) return { person: null, offline: true };
+    if (!user) return { person: null };
     const { data, error } = await this.sb.from('members').select('person').eq('email', (user.email || '').toLowerCase()).maybeSingle();
-    if (error || !data) return null;
-    return data.person;
+    if (error) return { person: null, offline: true };
+    return { person: data ? data.person : null };
   }
 
   async addTask(t) {
@@ -324,10 +325,10 @@ class CloudStore {
   async setCheck(day, key, who, on) {
     const d = this.state.checks[day] || (this.state.checks[day] = {});
     const c = d[key] || (d[key] = {});
-    if (on) c[who] = true; else delete c[who];
+    if (on) c[who] = new Date().toISOString(); else delete c[who];
     if (!Object.keys(c).length) delete d[key];
     this._cache();
-    if (on) await this.sb.from('checks').upsert({ day, item_key: key, user_key: who });
+    if (on) await this.sb.from('checks').upsert({ day, item_key: key, user_key: who, checked_at: c[who] });
     else await this.sb.from('checks').delete().eq('day', day).eq('item_key', key).eq('user_key', who);
   }
 
@@ -338,8 +339,9 @@ class CloudStore {
 
   async book(day, item_key, person, slot) {
     this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));
-    this.state.bookings.push({ day, item_key, person, slot }); this._cache();
-    await this.sb.from('bookings').upsert({ day, item_key, person, slot });
+    const created_at = new Date().toISOString();
+    this.state.bookings.push({ day, item_key, person, slot, created_at }); this._cache();
+    await this.sb.from('bookings').upsert({ day, item_key, person, slot, created_at });
   }
   async unbook(day, item_key, person) {
     this.state.bookings = this.state.bookings.filter(b => !(b.day === day && b.item_key === item_key && b.person === person));

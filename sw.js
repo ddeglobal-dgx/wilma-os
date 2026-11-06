@@ -1,5 +1,5 @@
 /* Service Worker — App-Shell offline verfügbar machen */
-const CACHE = 'wilma-os-v3';
+const CACHE = 'wilma-os-v4';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'data.js', 'store.js', 'config.js',
   'manifest.webmanifest',
