@@ -1,6 +1,6 @@
 /* ============ Wilma OS — App-Logik (früher „Betriebssystem Laura" / Wilma App) ============ */
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.2.0';
 
 let store = null;
 let me = null;            // wer dieses Gerät benutzt: 'dennis' | 'laura'
@@ -94,12 +94,80 @@ async function toggleCheck(day, key, owner, zuZweit) {
   if (on) {
     const item = itemOf(key);
     let msg = item ? ptsText(item.groesse, pointArtOf(item.owner)) : '';
-    if (owner === 'gemeinsam' && !wasDone && isDoneFor(day, key, owner)) { rainHearts(40); msg = 'Beide bestätigt – grün! ' + msg; }
-    else if (owner === 'gemeinsam') msg += ` · jetzt fehlt noch ${nameOf(partnerOf(me))}`;
+    const title = item ? item.title : key;
+    if (owner === 'gemeinsam' && !wasDone && isDoneFor(day, key, owner)) {
+      rainHearts(40); msg = 'Beide bestätigt – grün! ' + msg;
+      notify('Grün! ♡', `${nameOf(me)} hat „${title}" auch bestätigt – ihr seid durch.`);
+    } else if (owner === 'gemeinsam') {
+      msg += ` · jetzt fehlt noch ${nameOf(partnerOf(me))}`;
+      notify('Die Ampel braucht noch dich', `${nameOf(me)} hat „${title}" bestätigt – jetzt fehlt nur noch deine Bestätigung.`);
+    } else if (owner === 'haus' && day === todayISO()) {
+      notify('Erledigt ✓', `${nameOf(me)} hat „${title}" erledigt (${ptsText(item.groesse, 'wilma')}).`);
+    } else if (owner === 'jeder' && day === todayISO() && item && key.startsWith('routine:')) {
+      const r = store.state.routines.find(x => 'routine:' + x.id === key);
+      if (r && r.section === 'morgen' && morningDoneBy(me, day)) notify('Morgenroutine geschafft ♡', `${nameOf(me)} hat die Morgenroutine komplett – guten Start in den Tag!`);
+    }
     showToast(msg + ' ♡');
     celebrateGoals(goalsBefore);
     maybeCelebrate();
   }
+}
+
+/* ---------- Push-Nachrichten ----------
+   Versand läuft über die Edge Function „wilma-push" (prüft Bewohner, Ruhezeit 22–7, nie an sich selbst). */
+const PUSH_OK = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+function isIOS() { return /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+function isStandalone() { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+function urlB64ToU8(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+}
+async function pushStatus() {
+  if (!PUSH_OK) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    return sub ? 'on' : 'off';
+  } catch (e) { return 'off'; }
+}
+async function enablePush() {
+  if (!PUSH_OK) { showToast('Dieses Gerät kann keine Push-Nachrichten.'); return; }
+  if (isIOS() && !isStandalone()) { showToast('Erst zum Home-Bildschirm hinzufügen, dann einschalten ♡'); return; }
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') { showToast('Nicht erlaubt – du kannst es in den Einstellungen ändern.'); render(); return; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC_KEY) });
+    await store.savePushSubscription(sub.toJSON(), me);
+    showToast('Push ist an – Wilma OS sagt dir Bescheid ♡');
+  } catch (e) { console.warn(e); showToast('Das hat nicht geklappt: ' + (e.message || e)); }
+  render();
+}
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { await store.removePushSubscription(sub.endpoint); await sub.unsubscribe(); }
+  } catch (e) { console.warn(e); }
+  showToast('Push ist aus.'); render();
+}
+// Nachricht an die andere Person (nie an sich selbst). Läuft im Hintergrund, Fehler stören die App nicht.
+function notify(title, body, opts = {}) {
+  if (!store || store.mode !== 'cloud' || !me) return;
+  const hour = new Date().getHours();
+  if (!opts.force && (hour >= 22 || hour < 7)) return;
+  const to = partnerOf(me);
+  try {
+    store.sb.functions.invoke('wilma-push', { body: { to, title, body, url: opts.url || './' } })
+      .then(r => { if (r.error) console.warn('push', r.error); })
+      .catch(e => console.warn('push', e));
+  } catch (e) { console.warn('push', e); }
+}
+function morningDoneBy(person, day) {
+  const items = store.state.routines.filter(r => r.active && r.section === 'morgen' && (r.owner === 'jeder' || r.owner === person));
+  return items.length > 0 && items.every(r => hasChecked(day, 'routine:' + r.id, person));
 }
 
 function ptsText(n, art) { return `+${n} ${art === 'wilma' ? 'Wilma' : 'Soul'}-${n === 1 ? 'Punkt' : 'Punkte'}`; }
@@ -232,6 +300,7 @@ function celebrateGoals(before) {
     if (!before[art] && after[art]) {
       rainHearts(60);
       showToast(`Wochenziel ${art === 'soul' ? 'Soul' : 'Wilma'} erreicht – als Team! ♡`);
+      notify('Wochenziel erreicht ♡', `Ihr habt das ${art === 'soul' ? 'Soul' : 'Wilma'}-Ziel dieser Woche geschafft – als Team!`);
     }
   }
 }
@@ -360,6 +429,83 @@ function ampelHTML(day, r) {
     </div>`;
 }
 
+/* ---------- Wilma-Topf & Belohnungen ----------
+   Topf = alle Wilma-Punkte beider (seit Anfang) minus eingelöste (bestätigte + angefragte) Belohnungen. */
+function wilmaPot() {
+  const earned = PERSON_KEYS.reduce((sum, p) => sum + pointsFor(p, '2000-01-01', '2999-12-31').wilma, 0);
+  const spent = store.state.redemptions.reduce((sum, r) => sum + (r.cost || 0), 0);
+  return { earned, spent, left: earned - spent };
+}
+async function requestRedemption(reward) {
+  const pot = wilmaPot();
+  if (pot.left < reward.cost) { showToast(`Noch ${reward.cost - pot.left} Wilma-Punkte bis dahin ♡`); return; }
+  await store.addRedemption({ reward_id: reward.id, title: reward.title, cost: reward.cost, requested_by: me });
+  render(); showToast(`Angefragt – ${nameOf(partnerOf(me))} muss noch bestätigen ♡`);
+  notify('Belohnung einlösen?', `${nameOf(me)} möchte „${reward.title}" einlösen (${reward.cost} Wilma-Punkte). Bestätigst du?`);
+}
+async function confirmRedemption(r) {
+  await store.updateRedemption(r.id, { confirmed_by: me, confirmed_at: new Date().toISOString() });
+  render(); rainHearts(40); showToast(`„${r.title}" ist eingelöst – viel Freude! ♡`);
+  notify('Eingelöst ♡', `${nameOf(me)} hat „${r.title}" bestätigt – viel Freude euch beiden!`);
+}
+function rewardsHTML() {
+  const pot = wilmaPot();
+  const rewards = store.state.rewards.filter(r => r.active).sort((a, b) => a.cost - b.cost || a.pos - b.pos);
+  const pending = store.state.redemptions.filter(r => !r.confirmed_at);
+  const done = store.state.redemptions.filter(r => r.confirmed_at).sort((a, b) => b.confirmed_at.localeCompare(a.confirmed_at)).slice(0, 6);
+  return `
+    <div class="card" id="rewards-card">
+      <h2 class="section-title">Belohnungen</h2>
+      <div class="pot"><span class="pot-label">Wilma-Topf</span><b>${pot.left}</b><span class="settings-sub">von ${pot.earned} gesammelt · ${pot.spent} eingelöst</span></div>
+      ${pending.map(r => `
+        <div class="hist-row pending">
+          <span class="who who-${r.requested_by}">${PEOPLE[r.requested_by].short}</span>
+          <span class="grow">${esc(nameOf(r.requested_by))} möchte „${esc(r.title)}" einlösen <span class="pts pts-wilma">−${r.cost}</span></span>
+          ${r.requested_by === me
+            ? `<button class="btn small subtle" data-redeem-cancel="${r.id}">Zurück</button>`
+            : `<button class="btn small primary" data-redeem-confirm="${r.id}">Bestätigen ♡</button>`}
+        </div>`).join('')}
+      ${rewards.length ? rewards.map(r => `
+        <div class="hist-row">
+          <span class="reward-emoji">${esc(r.emoji || '🎁')}</span>
+          <span class="grow">${esc(r.title)}</span>
+          <span class="pts pts-wilma">${r.cost}</span>
+          <button class="btn small ${pot.left >= r.cost ? 'primary' : 'subtle'}" data-redeem="${r.id}">Einlösen</button>
+          <button class="btn small subtle" data-edit-reward="${r.id}">✎</button>
+        </div>`).join('') : '<p class="empty-note">Noch keine Belohnung – z. B. „Essen gehen" für 300 Wilma-Punkte. ♡</p>'}
+      <div style="margin-top:10px"><button class="btn small" id="add-reward">+ Belohnung</button></div>
+      ${done.length ? `<div class="hist-group-title" style="margin-top:12px">Eingelöst</div>${done.map(r => `
+        <div class="hist-row"><span class="exp-day">${r.confirmed_at.slice(8, 10)}.${r.confirmed_at.slice(5, 7)}.</span>
+        <span class="grow done-title">${esc(r.title)}</span><span class="who who-${r.requested_by}">${PEOPLE[r.requested_by].short}</span><span class="pts pts-wilma">−${r.cost}</span></div>`).join('')}` : ''}
+    </div>`;
+}
+function rewardModal(reward) {
+  const isNew = !reward;
+  openModal(`
+    <h3>${isNew ? 'Neue Belohnung' : 'Belohnung bearbeiten'}</h3>
+    <label>Wofür sammelt ihr?</label>
+    <input type="text" id="m-title" value="${reward ? esc(reward.title) : ''}" placeholder="z. B. Essen gehen">
+    <label>Symbol (Emoji)</label>
+    <input type="text" id="m-emoji" value="${reward ? esc(reward.emoji || '') : ''}" placeholder="🍝" maxlength="4">
+    <label>Kostet (Wilma-Punkte)</label>
+    <input type="number" id="m-cost" inputmode="numeric" min="1" value="${reward ? reward.cost : 300}">
+    <div class="modal-actions">
+      ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Speichern ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const title = document.getElementById('m-title').value.trim();
+    const cost = Math.round(Number(document.getElementById('m-cost').value));
+    if (!title || !(cost > 0)) return;
+    const f = { title, cost, emoji: document.getElementById('m-emoji').value.trim() || '🎁' };
+    if (isNew) await store.addReward(f); else await store.updateReward(reward.id, f);
+    closeModal(); render();
+  };
+  if (!isNew) document.getElementById('m-delete').onclick = async () => { await store.deleteReward(reward.id); closeModal(); render(); };
+}
+
 /* ---------- „Unser Stand": Ziele als Team, Punkte je Person ---------- */
 function ringHTML(art, q, goal) {
   const pct = q.pct ?? 0;
@@ -403,7 +549,7 @@ function standHTML() {
       <div class="stand-rings">${ringHTML('soul', qs, g.soul.woche)}${ringHTML('wilma', qw, g.wilma.woche)}</div>
       <div class="stand-remain">${remain('soul')}${remain('wilma')}</div>
       <div class="stand-people"><div class="stand-person stand-head"><span></span><span>Punkte diese Woche</span><span>Soul</span><span>Wilma</span></div>${people}</div>
-      <div class="stand-periods">${more}<div class="settings-sub">antippen → Verlauf</div></div>
+      <div class="stand-periods">${more}<div><b>Topf</b> ${wilmaPot().left} Wilma-Punkte für Belohnungen</div><div class="settings-sub">antippen → Verlauf</div></div>
     </div>`;
 }
 
@@ -722,6 +868,12 @@ function renderEinstellungen() {
   const whoBlock = store.mode === 'cloud'
     ? `<p style="margin-bottom:8px">Angemeldet als <b>${esc(nameOf(me))}</b> <button class="btn small subtle" id="logout">Abmelden</button></p>`
     : `<p style="margin-bottom:8px">Testmodus – ich bin: ${PERSON_KEYS.map(p => `<button class="btn small ${p === me ? 'primary' : 'subtle'}" data-be="${p}">${nameOf(p)}</button>`).join(' ')}</p>`;
+  const pushBlock = store.mode === 'cloud' ? `
+    <div class="card" id="push-card">
+      <h2 class="section-title">Benachrichtigungen</h2>
+      <p class="settings-sub" style="margin-bottom:8px">Wilma OS sagt dir Bescheid, wenn ${esc(nameOf(partnerOf(me)))} etwas erledigt, bucht oder dir ein To-do gibt. Ruhezeit 22–7 Uhr. Nie für dein eigenes Häkchen.</p>
+      <div id="push-status"><span class="settings-sub">… prüfe</span></div>
+    </div>` : '';
   const infoBlock = `
     <div class="card">
       <h2 class="section-title">App</h2>
@@ -734,12 +886,25 @@ function renderEinstellungen() {
   return `${goalsBlock}
     <h2 class="section-title" style="margin:14px 0 10px">Routinen</h2>${routineBlocks}
     <h2 class="section-title" style="margin:14px 0 10px">Wochenplan</h2>${dayBlocks}
-    ${rulesBlock}${infoBlock}`;
+    ${rulesBlock}${pushBlock}${infoBlock}`;
+}
+async function fillPushStatus() {
+  const el = document.getElementById('push-status');
+  if (!el) return;
+  const st = await pushStatus();
+  const hint = isIOS() && !isStandalone() ? '<p class="settings-sub" style="margin-top:6px">Auf dem iPhone geht das nur in der installierten App (Teilen → Zum Home-Bildschirm).</p>' : '';
+  el.innerHTML = st === 'on' ? '<span class="sync-status ok">● Push ist an auf diesem Gerät</span> <button class="btn small subtle" id="push-off">Ausschalten</button>'
+    : st === 'denied' ? '<span class="sync-status off">● In den Geräte-Einstellungen blockiert</span>' + hint
+    : st === 'unsupported' ? '<span class="sync-status off">● Dieses Gerät kann keine Push-Nachrichten</span>' + hint
+    : '<button class="btn small primary" id="push-on">Push einschalten ♡</button>' + hint;
+  const on = document.getElementById('push-on'); if (on) on.onclick = enablePush;
+  const off = document.getElementById('push-off'); if (off) off.onclick = disablePush;
 }
 
 /* ---------- Budget ---------- */
 let budgetMonth = null;
 let budgetFilter = 'alle';   // alle | dennis | laura | gemeinsam
+let budgetView = 'ausgaben'; // ausgaben | konten
 const CAT_PASTELS = ['#f8e3d1', '#f5d8d3', '#f4ecc9', '#d9ece7', '#e4def2', '#f7e0ea'];
 
 function monthKeyOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }
@@ -753,9 +918,10 @@ function shiftMonth(key, delta) {
 }
 function euro(cents) { return (cents / 100).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }); }
 function parseEuro(s) {
-  s = String(s).trim().replace(/€/g, '').trim();
+  s = String(s).trim().replace(/€/g, '').replace(/\s/g, '');
   if (!s) return null;
   if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (/\.\d{3}$/.test(s)) s = s.replace(/\./g, '');   // „2.350" = Tausender-Punkt, „2.35" = Dezimalpunkt
   const n = parseFloat(s);
   return (isNaN(n) || n < 0) ? null : Math.round(n * 100);
 }
@@ -770,7 +936,185 @@ function monthExpensesFor(month) {
   return store.state.expenses.filter(e => (e.day || '').startsWith(month));
 }
 
+function parseEuroSigned(s) {
+  s = String(s).trim();
+  const neg = s.startsWith('-') || s.startsWith('−');
+  const v = parseEuro(s.replace(/^[-−]\s*/, ''));
+  return v === null ? null : (neg ? -v : v);
+}
+function euroSigned(cents) { return (cents < 0 ? '−' : '') + euro(Math.abs(cents)); }
+// Letzter Kontostand bis einschließlich Tag (oder überhaupt)
+function balanceAt(accountId, dayIso) {
+  const list = store.state.balances.filter(b => b.account_id === accountId && (!dayIso || b.day <= dayIso)).sort((a, b) => a.day.localeCompare(b.day));
+  return list.length ? list[list.length - 1] : null;
+}
+function netAt(accounts, dayIso) {
+  let sum = 0, any = false;
+  for (const a of accounts) { const b = balanceAt(a.id, dayIso); if (b) { any = true; sum += (ACCOUNT_ARTS[a.art]?.sign || 1) * b.amount; } }
+  return any ? sum : null;
+}
+function netChartHTML(accounts) {
+  const months = [];
+  const now = new Date();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);   // Monatsende
+    const end = i === 0 ? todayISO() : toISO(d);
+    months.push({ label: d.toLocaleDateString('de-DE', { month: 'short' }), net: netAt(accounts, end), key: monthKeyOf(d) });
+  }
+  const pts = months.filter(m => m.net !== null);
+  if (pts.length < 2) return '<p class="settings-sub">Ab dem zweiten Monat mit Kontoständen erscheint hier die Kurve.</p>';
+  const vals = pts.map(p => p.net);
+  const min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  const W = 320, H = 110, pad = 8;
+  const x = i => pad + i * (W - 2 * pad) / (months.length - 1);
+  const y = v => H - pad - ((v - min) / ((max - min) || 1)) * (H - 2 * pad);
+  const path = months.map((m, i) => m.net === null ? null : `${x(i).toFixed(1)},${y(m.net).toFixed(1)}`).filter(Boolean);
+  const zero = y(0);
+  return `
+    <svg class="net-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Vermögensverlauf 12 Monate">
+      <line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" class="net-zero"/>
+      <polyline points="${path.join(' ')}" class="net-line"/>
+      ${months.map((m, i) => m.net === null ? '' : `<circle cx="${x(i)}" cy="${y(m.net)}" r="3" class="net-dot ${i === months.length - 1 ? 'last' : ''}"/>`).join('')}
+    </svg>
+    <div class="net-labels">${months.map(m => `<span>${m.label}</span>`).join('')}</div>`;
+}
+function renderKonten() {
+  const accounts = store.state.accounts.filter(a => a.active).sort((a, b) => a.pos - b.pos);
+  const today = todayISO();
+  const month = today.slice(0, 7);
+  const net = netAt(accounts, today);
+  const prevMonthEnd = toISO(new Date(new Date().getFullYear(), new Date().getMonth(), 0));
+  const netPrev = netAt(accounts, prevMonthEnd);
+  const delta = (net !== null && netPrev !== null) ? net - netPrev : null;
+  const needsEntry = accounts.length && !store.state.balances.some(b => b.day.startsWith(month)) && Number(today.slice(8, 10)) <= 10;
+
+  const summary = accounts.length ? `
+    <div class="card net-card">
+      <h2 class="section-title">Vermögen netto</h2>
+      <div class="net-value ${net !== null && net < 0 ? 'over-text' : ''}">${net === null ? '–' : euroSigned(net)}</div>
+      ${delta !== null ? `<div class="settings-sub">seit Vormonat ${delta >= 0 ? '+' : '−'}${euro(Math.abs(delta))} ${trendArrow(delta, 0)}</div>` : '<div class="settings-sub">Guthaben minus Schulden (Kredite, Kreditkarte)</div>'}
+      ${netChartHTML(accounts)}
+    </div>` : '';
+
+  const reminder = needsEntry ? `
+    <div class="card reminder-card">
+      <b>Zeit für die Kontostände ${monthLabel(month)} ♡</b>
+      <p class="settings-sub">Einmal im Monat alle Stände eintragen – dann wächst die Kurve.</p>
+      <div style="margin-top:8px"><button class="btn small primary" data-add-balance="">+ Kontostand</button></div>
+    </div>` : '';
+
+  const list = accounts.map(a => {
+    const art = ACCOUNT_ARTS[a.art] || ACCOUNT_ARTS.sonstiges;
+    const cur = balanceAt(a.id, null);
+    const hist = store.state.balances.filter(b => b.account_id === a.id).sort((x, y) => x.day.localeCompare(y.day));
+    const prev = hist.length >= 2 ? hist[hist.length - 2] : null;
+    const d = cur && prev ? art.sign * (cur.amount - prev.amount) : null;   // Wirkung aufs Vermögen (Tilgung = plus)
+    return `
+      <div class="card budget-cat" data-account="${a.id}">
+        <div class="cat-emoji" style="background:${art.sign < 0 ? '#f5d8d3' : '#d9ece7'}">${art.emoji}</div>
+        <div class="cat-main">
+          <div class="cat-name">${esc(a.name)} ${(a.owner || 'gemeinsam') !== 'gemeinsam' ? `<span class="who who-${a.owner}">${PEOPLE[a.owner].short}</span>` : ''}</div>
+          <div class="cat-sub">${art.label}${cur ? ` · Stand ${cur.day.slice(8, 10)}.${cur.day.slice(5, 7)}.` : ' · noch kein Stand'}${d !== null ? ` · ${d >= 0 ? '+' : '−'}${euro(Math.abs(d))} ${trendArrow(d, 0)}` : ''}</div>
+        </div>
+        <div class="acc-amount ${art.sign < 0 ? 'over-text' : ''}">${cur ? (art.sign < 0 ? '−' : '') + euro(Math.abs(cur.amount)) : '–'}</div>
+      </div>`;
+  }).join('');
+
+  const empty = accounts.length ? '' : `
+    <div class="card" style="text-align:center"><p class="empty-note">Legt eure Konten an – Giro, Tagesgeld, Depot, auch den Hauskredit. Einmal im Monat die Stände eintragen, und ihr seht, wie sich euer Vermögen entwickelt. ♡</p></div>`;
+  const actions = `
+    <div class="budget-actions">
+      ${accounts.length ? '<button class="btn primary" data-add-balance="">+ Kontostand</button>' : ''}
+      <button class="btn" id="add-account">+ Konto</button>
+    </div>`;
+  return reminder + summary + list + empty + actions;
+}
+function accountModal(acc) {
+  const isNew = !acc;
+  openModal(`
+    <h3>${isNew ? 'Neues Konto' : 'Konto bearbeiten'}</h3>
+    <label>Name</label>
+    <input type="text" id="m-name" value="${acc ? esc(acc.name) : ''}" placeholder="z. B. Giro Laura, Hauskredit">
+    <label>Art</label>
+    <select id="m-art">${Object.keys(ACCOUNT_ARTS).map(k => `<option value="${k}" ${(acc ? acc.art : 'giro') === k ? 'selected' : ''}>${ACCOUNT_ARTS[k].emoji} ${ACCOUNT_ARTS[k].label}</option>`).join('')}</select>
+    <label>Wem gehört es?</label>
+    <select id="m-aowner">${['gemeinsam', 'dennis', 'laura'].map(o => `<option value="${o}" ${(acc ? acc.owner : 'gemeinsam') === o ? 'selected' : ''}>${o === 'gemeinsam' ? 'Gemeinsam' : nameOf(o)}</option>`).join('')}</select>
+    <div class="modal-actions">
+      ${isNew ? '' : '<button class="btn small danger" id="m-delete">Löschen</button>'}
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Speichern ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const name = document.getElementById('m-name').value.trim();
+    if (!name) return;
+    const f = { name, art: document.getElementById('m-art').value, owner: document.getElementById('m-aowner').value };
+    if (isNew) await store.addAccount(f); else await store.updateAccount(acc.id, f);
+    closeModal(); render();
+  };
+  if (!isNew) document.getElementById('m-delete').onclick = async () => {
+    if (!confirm(`„${acc.name}" und alle Kontostände löschen?`)) return;
+    await store.deleteAccount(acc.id); closeModal(); render();
+  };
+}
+function balanceModal(prefillId) {
+  const accounts = store.state.accounts.filter(a => a.active).sort((a, b) => a.pos - b.pos);
+  if (!accounts.length) return;
+  openModal(`
+    <h3>Kontostand eintragen</h3>
+    <label>Konto</label>
+    <select id="m-acc">${accounts.map(a => `<option value="${a.id}" ${a.id === prefillId ? 'selected' : ''}>${ACCOUNT_ARTS[a.art]?.emoji || ''} ${esc(a.name)}</option>`).join('')}</select>
+    <label>Stand (€) – bei Krediten den offenen Betrag</label>
+    <input type="text" id="m-amount" inputmode="decimal" placeholder="z. B. 2.350,00" autofocus>
+    <label>Stichtag</label>
+    <input type="date" id="m-day" value="${todayISO()}">
+    <div class="modal-actions">
+      <button class="btn small subtle" id="m-cancel">Abbrechen</button>
+      <button class="btn small primary" id="m-save">Speichern ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-save').onclick = async () => {
+    const amount = parseEuroSigned(document.getElementById('m-amount').value);
+    if (amount === null) { document.getElementById('m-amount').focus(); return; }
+    await store.setBalance(document.getElementById('m-acc').value, document.getElementById('m-day').value || todayISO(), amount, me);
+    closeModal(); render(); showToast('Kontostand gespeichert ♡');
+  };
+}
+function accountDetailModal(acc) {
+  const art = ACCOUNT_ARTS[acc.art] || ACCOUNT_ARTS.sonstiges;
+  const hist = store.state.balances.filter(b => b.account_id === acc.id).sort((x, y) => y.day.localeCompare(x.day));
+  openModal(`
+    <h3>${art.emoji} ${esc(acc.name)}</h3>
+    ${hist.length ? hist.map((b, i) => {
+      const prev = hist[i + 1];
+      const d = prev ? b.amount - prev.amount : null;
+      return `<div class="expense-row">
+        <span class="exp-day">${b.day.slice(8, 10)}.${b.day.slice(5, 7)}.${b.day.slice(2, 4)}</span>
+        <span class="grow">${d !== null ? `<span class="settings-sub">${d >= 0 ? '+' : '−'}${euro(Math.abs(d))}</span>` : ''}</span>
+        ${b.created_by ? `<span class="who who-${b.created_by}">${PEOPLE[b.created_by].short}</span>` : ''}
+        <span class="exp-amount">${euroSigned(b.amount)}</span>
+        <button class="btn small danger" data-del-bal="${b.day}">×</button>
+      </div>`; }).join('') : '<p class="empty-note">Noch kein Kontostand eingetragen.</p>'}
+    <div class="modal-actions">
+      <button class="btn small subtle" id="m-cancel">Schließen</button>
+      <button class="btn small" id="m-edit-acc">Bearbeiten</button>
+      <button class="btn small primary" id="m-add-bal">+ Kontostand ♡</button>
+    </div>`);
+  document.getElementById('m-cancel').onclick = closeModal;
+  document.getElementById('m-edit-acc').onclick = () => { closeModal(); accountModal(acc); };
+  document.getElementById('m-add-bal').onclick = () => { closeModal(); balanceModal(acc.id); };
+  document.querySelectorAll('[data-del-bal]').forEach(b => b.onclick = async () => {
+    await store.deleteBalance(acc.id, b.dataset.delBal); closeModal(); render(); accountDetailModal(acc);
+  });
+}
+
 function renderBudget() {
+  const viewBar = `
+    <div class="seg-toggle">
+      <button class="seg ${budgetView === 'ausgaben' ? 'active' : ''}" data-bview="ausgaben">Ausgaben</button>
+      <button class="seg ${budgetView === 'konten' ? 'active' : ''}" data-bview="konten">Konten</button>
+    </div>`;
+  if (budgetView === 'konten') return viewBar + renderKonten();
   if (!budgetMonth) budgetMonth = monthKeyOf(new Date());
   ensureMonthBudgets(budgetMonth);
   const cats = store.state.budgetCats.filter(c => c.active && (budgetFilter === 'alle' || (c.owner || 'gemeinsam') === budgetFilter)).sort((a, b) => a.pos - b.pos);
@@ -835,7 +1179,7 @@ function renderBudget() {
       <button class="btn" id="add-cat">+ Kategorie</button>
     </div>`;
 
-  return nav + summary + catCards + empty + actions;
+  return viewBar + nav + summary + catCards + empty + actions;
 }
 
 function catDetailModal(cat) {
@@ -962,7 +1306,10 @@ async function toggleTodo(id) {
   const on = !t.done_at;
   await store.updateTodo(id, on ? { done_at: new Date().toISOString(), done_by: me } : { done_at: null, done_by: null });
   render();
-  if (on) showToast(ptsText(t.groesse || 3, 'wilma') + ' ♡');
+  if (on) {
+    showToast(ptsText(t.groesse || 3, 'wilma') + ' ♡');
+    notify('To-do erledigt ✓', `${nameOf(me)} hat „${t.title}" erledigt (${ptsText(t.groesse || 3, 'wilma')}).`);
+  }
 }
 
 function todoModal(todo) {
@@ -995,6 +1342,9 @@ function todoModal(todo) {
       due: document.getElementById('m-due').value || null,
     };
     if (isNew) await store.addTodo(fields); else await store.updateTodo(todo.id, fields);
+    if (fields.owner === partnerOf(me) && (isNew || todo.owner !== fields.owner)) {
+      notify('Neues To-do für dich', `${nameOf(me)}: „${fields.title}"${fields.due ? ' · bis ' + fields.due.slice(8, 10) + '.' + fields.due.slice(5, 7) + '.' : ''}`);
+    }
     closeModal(); render();
   };
   if (!isNew) document.getElementById('m-delete').onclick = async () => {
@@ -1009,6 +1359,7 @@ async function bookingAction(key, act) {
   if (act === 'release') {
     await store.unbook(day, key, me);
     render(); showToast(`${title} zurückgegeben`);
+    notify('Zurückgegeben', `${nameOf(me)} gibt „${title}" zurück – jemand muss übernehmen.`);
     return;
   }
   const hour = new Date().getHours();
@@ -1017,6 +1368,7 @@ async function bookingAction(key, act) {
     const other = bookingsFor(day, key).find(b => b.person !== me);
     await store.book(day, key, me, other ? other.slot : guess);
     render(); showToast(`Du bist bei „${title}" dabei ♡`);
+    notify('Dabei ♡', `${nameOf(me)} kommt bei „${title}" mit.`);
     return;
   }
   openModal(`
@@ -1031,6 +1383,7 @@ async function bookingAction(key, act) {
     await store.book(day, key, me, b.dataset.slot);
     closeModal(); render();
     showToast(`Gebucht: ${title} · ${SLOTS[b.dataset.slot]} ♡`);
+    notify('Übernommen', `${nameOf(me)} übernimmt „${title}" ${SLOTS[b.dataset.slot]} – du kannst dich dazubuchen.`);
   });
 }
 
@@ -1164,7 +1517,7 @@ function renderVerlauf() {
         </div>`).join('') : '<p class="empty-note">In diesem Zeitraum noch keine To-dos erledigt.</p>'}
     </div>`;
 
-  return toggle + chartCard + pointsCard + itemsCard + todosCard;
+  return toggle + chartCard + pointsCard + rewardsHTML() + itemsCard + todosCard;
 }
 
 /* ---------- Modals ---------- */
@@ -1428,6 +1781,18 @@ function render() {
     render(); showToast('Ziele gespeichert ♡');
   };
   view.querySelectorAll('[data-bfilter]').forEach(b => b.onclick = () => { budgetFilter = b.dataset.bfilter; render(); });
+  view.querySelectorAll('[data-bview]').forEach(b => b.onclick = () => { budgetView = b.dataset.bview; render(); });
+  const addAcc = document.getElementById('add-account');
+  if (addAcc) addAcc.onclick = () => accountModal(null);
+  view.querySelectorAll('[data-add-balance]').forEach(b => b.onclick = () => balanceModal(b.dataset.addBalance || null));
+  view.querySelectorAll('[data-account]').forEach(el => el.onclick = () => accountDetailModal(store.state.accounts.find(a => a.id === el.dataset.account)));
+  const addReward = document.getElementById('add-reward');
+  if (addReward) addReward.onclick = () => rewardModal(null);
+  view.querySelectorAll('[data-edit-reward]').forEach(b => b.onclick = () => rewardModal(store.state.rewards.find(r => r.id === b.dataset.editReward)));
+  view.querySelectorAll('[data-redeem]').forEach(b => b.onclick = () => requestRedemption(store.state.rewards.find(r => r.id === b.dataset.redeem)));
+  view.querySelectorAll('[data-redeem-confirm]').forEach(b => b.onclick = () => confirmRedemption(store.state.redemptions.find(r => r.id === b.dataset.redeemConfirm)));
+  view.querySelectorAll('[data-redeem-cancel]').forEach(b => b.onclick = async () => { await store.deleteRedemption(b.dataset.redeemCancel); render(); });
+  fillPushStatus();
   view.querySelectorAll('[data-be]').forEach(b => b.onclick = () => {
     me = b.dataset.be;
     try { localStorage.setItem('wilma-me', me); } catch (e) {}

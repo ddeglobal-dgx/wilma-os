@@ -1,5 +1,5 @@
 /* Service Worker — App-Shell offline verfügbar machen */
-const CACHE = 'wilma-os-v4';
+const CACHE = 'wilma-os-v5';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'data.js', 'store.js', 'config.js',
   'manifest.webmanifest',
@@ -44,4 +44,22 @@ self.addEventListener('fetch', e => {
       }).catch(() => caches.match(e.request))
     );
   }
+});
+
+/* ---------- Push-Nachrichten ---------- */
+self.addEventListener('push', e => {
+  let data = { title: 'Wilma OS', body: '', url: './' };
+  try { data = { ...data, ...e.data.json() }; } catch (err) { if (e.data) data.body = e.data.text(); }
+  e.waitUntil(self.registration.showNotification(data.title, {
+    body: data.body, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png',
+    tag: data.tag || 'wilma', renotify: false, data: { url: data.url },
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const target = new URL(e.notification.data?.url || './', self.location.href).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ('focus' in c) { c.navigate?.(target); return c.focus(); } }
+    return self.clients.openWindow(target);
+  }));
 });

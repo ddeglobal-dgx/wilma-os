@@ -156,3 +156,14 @@ const CELEBRATE_MESSAGES = [
   'Du hast heute alles gegeben – jetzt genieß den Abend!',
   'Häkchen komplett – Herz voll!',
 ];
+
+// Konten-Arten
+const ACCOUNT_ARTS = {
+  giro: { label: 'Girokonto', emoji: '🏦', sign: 1 },
+  tagesgeld: { label: 'Tagesgeld / Sparen', emoji: '🐷', sign: 1 },
+  depot: { label: 'Depot', emoji: '📈', sign: 1 },
+  bar: { label: 'Bargeld', emoji: '💶', sign: 1 },
+  kreditkarte: { label: 'Kreditkarte (Schuld)', emoji: '💳', sign: -1 },
+  kredit: { label: 'Kredit / Darlehen (Schuld)', emoji: '🏠', sign: -1 },
+  sonstiges: { label: 'Sonstiges', emoji: '💼', sign: 1 },
+};

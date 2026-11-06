@@ -32,6 +32,10 @@ function buildDefaultState() {
     budgets: {},      // { '2026-08': { <catId>: amountCents } }
     expenses: [],     // [{ id, cat_id, amount (Cent), note, day 'YYYY-MM-DD' }]
     todos: [],        // [{ id, title, pos, created_at, done_at (ISO|null) }]
+    accounts: [],     // [{ id, name, owner, art, pos, active }]
+    balances: [],     // [{ account_id, day, amount (Cent), created_by }]
+    rewards: [],      // [{ id, title, emoji, cost, pos, active }]
+    redemptions: [],  // [{ id, reward_id, title, cost, requested_by, confirmed_by, created_at, confirmed_at }]
   };
 }
 
@@ -41,6 +45,7 @@ function migrateState(state) {
   if (!state.expenses) state.expenses = [];
   if (!state.todos) state.todos = [];
   if (!state.bookings) state.bookings = [];
+  for (const k of ['accounts', 'balances', 'rewards', 'redemptions']) if (!state[k]) state[k] = [];
   if (!state.settings.ziele) state.settings.ziele = DEFAULT_GOALS;
   for (const x of [...state.tasks, ...state.routines]) { if (!x.groesse) x.groesse = 1; if (x.zu_zweit == null) x.zu_zweit = false; }
   for (const t of state.todos) if (!t.groesse) t.groesse = 3;
@@ -168,6 +173,37 @@ class LocalStore {
   async deleteTodo(id) {
     this.state.todos = this.state.todos.filter(t => t.id !== id); this._save();
   }
+
+  async addAccount(f) {
+    const row = { id: newId(), owner: 'gemeinsam', art: 'giro', pos: this.state.accounts.length, active: true, created_at: new Date().toISOString(), ...f };
+    this.state.accounts.push(row); this._save(); return row;
+  }
+  async updateAccount(id, patch) { Object.assign(this.state.accounts.find(a => a.id === id) || {}, patch); this._save(); }
+  async deleteAccount(id) {
+    this.state.accounts = this.state.accounts.filter(a => a.id !== id);
+    this.state.balances = this.state.balances.filter(b => b.account_id !== id); this._save();
+  }
+  async setBalance(account_id, day, amount, created_by) {
+    this.state.balances = this.state.balances.filter(b => !(b.account_id === account_id && b.day === day));
+    this.state.balances.push({ account_id, day, amount, created_by, created_at: new Date().toISOString() }); this._save();
+  }
+  async deleteBalance(account_id, day) {
+    this.state.balances = this.state.balances.filter(b => !(b.account_id === account_id && b.day === day)); this._save();
+  }
+  async addReward(f) {
+    const row = { id: newId(), emoji: '🎁', pos: this.state.rewards.length, active: true, created_at: new Date().toISOString(), ...f };
+    this.state.rewards.push(row); this._save(); return row;
+  }
+  async updateReward(id, patch) { Object.assign(this.state.rewards.find(r => r.id === id) || {}, patch); this._save(); }
+  async deleteReward(id) { this.state.rewards = this.state.rewards.filter(r => r.id !== id); this._save(); }
+  async addRedemption(f) {
+    const row = { id: newId(), confirmed_by: null, confirmed_at: null, created_at: new Date().toISOString(), ...f };
+    this.state.redemptions.push(row); this._save(); return row;
+  }
+  async updateRedemption(id, patch) { Object.assign(this.state.redemptions.find(r => r.id === id) || {}, patch); this._save(); }
+  async deleteRedemption(id) { this.state.redemptions = this.state.redemptions.filter(r => r.id !== id); this._save(); }
+  async savePushSubscription() {}
+  async removePushSubscription() {}
 }
 
 /* ---------- Cloud-Speicher (Supabase) ---------- */
@@ -193,7 +229,7 @@ class CloudStore {
 
   async _loadAll() {
     const since = toISODate(new Date(Date.now() - 3 * 86400000));
-    const [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings] = await Promise.all([
+    const [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings, accounts, balances, rewards, redemptions] = await Promise.all([
       this.sb.from('tasks').select('*').order('pos'),
       this.sb.from('routine_items').select('*').order('pos'),
       this.sb.from('rules').select('*').order('pos'),
@@ -204,8 +240,12 @@ class CloudStore {
       this.sb.from('expenses').select('*').order('day'),
       this.sb.from('todos').select('*').order('pos'),
       this.sb.from('bookings').select('*').gte('day', since),
+      this.sb.from('accounts').select('*').order('pos'),
+      this.sb.from('account_balances').select('*').order('day'),
+      this.sb.from('rewards').select('*').order('pos'),
+      this.sb.from('reward_redemptions').select('*').order('created_at'),
     ]);
-    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings]) if (r.error) throw r.error;
+    for (const r of [tasks, routines, rules, checks, settings, cats, budgets, expenses, todos, bookings, accounts, balances, rewards, redemptions]) if (r.error) throw r.error;
 
     const checkMap = {};
     for (const c of checks.data) {
@@ -225,6 +265,7 @@ class CloudStore {
       checks: checkMap, settings: settingsMap,
       budgetCats: cats.data, budgets: budgetMap, expenses: expenses.data,
       todos: todos.data, bookings: bookings.data,
+      accounts: accounts.data, balances: balances.data, rewards: rewards.data, redemptions: redemptions.data,
     };
   }
 
@@ -402,5 +443,61 @@ class CloudStore {
   async deleteTodo(id) {
     this.state.todos = this.state.todos.filter(t => t.id !== id); this._cache();
     await this.sb.from('todos').delete().eq('id', id);
+  }
+
+  async addAccount(f) {
+    const row = { id: newId(), owner: 'gemeinsam', art: 'giro', pos: this.state.accounts.length, active: true, ...f };
+    this.state.accounts.push(row); this._cache();
+    await this.sb.from('accounts').insert(row); return row;
+  }
+  async updateAccount(id, patch) {
+    Object.assign(this.state.accounts.find(a => a.id === id) || {}, patch); this._cache();
+    await this.sb.from('accounts').update(patch).eq('id', id);
+  }
+  async deleteAccount(id) {
+    this.state.accounts = this.state.accounts.filter(a => a.id !== id);
+    this.state.balances = this.state.balances.filter(b => b.account_id !== id); this._cache();
+    await this.sb.from('accounts').delete().eq('id', id);
+  }
+  async setBalance(account_id, day, amount, created_by) {
+    this.state.balances = this.state.balances.filter(b => !(b.account_id === account_id && b.day === day));
+    this.state.balances.push({ account_id, day, amount, created_by }); this._cache();
+    await this.sb.from('account_balances').upsert({ account_id, day, amount, created_by });
+  }
+  async deleteBalance(account_id, day) {
+    this.state.balances = this.state.balances.filter(b => !(b.account_id === account_id && b.day === day)); this._cache();
+    await this.sb.from('account_balances').delete().eq('account_id', account_id).eq('day', day);
+  }
+  async addReward(f) {
+    const row = { id: newId(), emoji: '🎁', pos: this.state.rewards.length, active: true, ...f };
+    this.state.rewards.push(row); this._cache();
+    await this.sb.from('rewards').insert(row); return row;
+  }
+  async updateReward(id, patch) {
+    Object.assign(this.state.rewards.find(r => r.id === id) || {}, patch); this._cache();
+    await this.sb.from('rewards').update(patch).eq('id', id);
+  }
+  async deleteReward(id) {
+    this.state.rewards = this.state.rewards.filter(r => r.id !== id); this._cache();
+    await this.sb.from('rewards').delete().eq('id', id);
+  }
+  async addRedemption(f) {
+    const row = { id: newId(), confirmed_by: null, confirmed_at: null, created_at: new Date().toISOString(), ...f };
+    this.state.redemptions.push(row); this._cache();
+    await this.sb.from('reward_redemptions').insert(row); return row;
+  }
+  async updateRedemption(id, patch) {
+    Object.assign(this.state.redemptions.find(r => r.id === id) || {}, patch); this._cache();
+    await this.sb.from('reward_redemptions').update(patch).eq('id', id);
+  }
+  async deleteRedemption(id) {
+    this.state.redemptions = this.state.redemptions.filter(r => r.id !== id); this._cache();
+    await this.sb.from('reward_redemptions').delete().eq('id', id);
+  }
+  async savePushSubscription(sub, person) {
+    await this.sb.from('push_subscriptions').upsert({ endpoint: sub.endpoint, person, keys: sub.keys, ua: navigator.userAgent.slice(0, 200) });
+  }
+  async removePushSubscription(endpoint) {
+    await this.sb.from('push_subscriptions').delete().eq('endpoint', endpoint);
   }
 }

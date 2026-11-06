@@ -8,3 +8,6 @@
 */
 const SUPABASE_URL = 'https://lcdlotidyarunuafonvp.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_NUv6jBYfyiBuODE671WRqw_d6E0VnNn';
+
+// Öffentlicher VAPID-Schlüssel für Push (der private liegt nur als Secret bei Supabase)
+const VAPID_PUBLIC_KEY = 'BNiX1loaAxYon7hmE86_B7b5Zt7axlFCf7JsBaPWl03paKfXVpxbFiM7ApQ-nmRIZ75Yw9uLG10bM_6Tx-MG3cA';
